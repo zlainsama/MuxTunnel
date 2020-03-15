@@ -1,15 +1,11 @@
 package me.lain.muxtun;
 
-import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,17 +20,22 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import io.netty.handler.proxy.ProxyHandler;
 import io.netty.handler.proxy.Socks5ProxyHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.SupportedCipherSuiteFilter;
 import io.netty.handler.ssl.util.FingerprintTrustManagerFactory;
+import io.netty.util.concurrent.Future;
+import me.lain.muxtun.sipo.SinglePoint;
+import me.lain.muxtun.sipo.SinglePointConfig;
+import me.lain.muxtun.util.SimpleLogger;
 
 public class App
 {
 
-    public static class SinglePointConfig
+    public static class SinglePointTempConfig
     {
 
         public final String name;
@@ -48,23 +49,45 @@ public class App
         public UUID targetAddress = null;
         public Path pathSecret = null;
         public Path pathSecret_3 = null;
-        public int numLinks = SinglePoint.DEFAULT_NUMLINKS;
-        public int limitOpen = SinglePoint.DEFAULT_LIMITOPEN;
-        public int maxCLF = SinglePoint.DEFAULT_MAXCLF;
+        public int numLinks = SinglePointConfig.DEFAULT_NUMLINKS;
+        public int limitOpen = SinglePointConfig.DEFAULT_LIMITOPEN;
+        public int maxCLF = SinglePointConfig.DEFAULT_MAXCLF;
+        public long writeLimit = 0L;
+        public long readLimit = 0L;
         public SslContext sslCtx = null;
-        public Optional<byte[]> secret = null;
-        public Optional<byte[]> secret_3 = null;
+        public byte[] secret = null;
+        public byte[] secret_3 = null;
 
-        public SinglePointConfig(String name)
+        public SinglePointTempConfig(String name)
         {
             this.name = name;
         }
 
+        public SinglePointConfig finish()
+        {
+            return new SinglePointConfig(
+                    bindAddress,
+                    remoteAddress,
+                    proxySupplier,
+                    sslCtx,
+                    targetAddress,
+                    secret,
+                    secret_3,
+                    numLinks,
+                    limitOpen,
+                    maxCLF,
+                    writeLimit,
+                    readLimit,
+                    name);
+        }
+
     }
 
-    private static Map<String, SinglePointConfig> configs = new HashMap<>();
+    private static Map<String, SinglePointTempConfig> configs = new HashMap<>();
     private static List<SinglePoint> points = new ArrayList<>();
     private static String profile = "SinglePoint";
+    private static long globalWriteLimit = 0L;
+    private static long globalReadLimit = 0L;
 
     private static void discardOut()
     {
@@ -72,7 +95,7 @@ public class App
         System.setErr(new PrintStream(Shared.voidStream));
     }
 
-    private static Optional<byte[]> generateSecret(Path path, byte[] magic)
+    private static byte[] generateSecret(Path path, byte[] magic)
     {
         try (FileChannel fc = FileChannel.open(path, StandardOpenOption.READ))
         {
@@ -80,15 +103,15 @@ public class App
 
             fc.transferTo(0L, Long.MAX_VALUE, Channels.newChannel(new DigestOutputStream(Shared.voidStream, md)));
 
-            return Optional.of(md.digest(magic));
+            return md.digest(magic);
         }
         catch (Exception e)
         {
-            return Optional.empty();
+            return null;
         }
     }
 
-    private static Optional<byte[]> generateSecret_3(Path path, byte[] magic)
+    private static byte[] generateSecret_3(Path path, byte[] magic)
     {
         try (FileChannel fc = FileChannel.open(path, StandardOpenOption.READ))
         {
@@ -96,17 +119,17 @@ public class App
 
             fc.transferTo(0L, Long.MAX_VALUE, Channels.newChannel(new DigestOutputStream(Shared.voidStream, md)));
 
-            return Optional.of(md.digest(magic));
+            return md.digest(magic);
         }
         catch (Exception e)
         {
-            return Optional.empty();
+            return null;
         }
     }
 
-    private static SinglePointConfig getConfig(String profile)
+    private static SinglePointTempConfig getConfig(String profile)
     {
-        return configs.computeIfAbsent(profile, SinglePointConfig::new);
+        return configs.computeIfAbsent(profile, SinglePointTempConfig::new);
     }
 
     private static Path init(String... args) throws Exception
@@ -143,118 +166,34 @@ public class App
         if (silent)
             discardOut();
         if (!nolog)
-            logOut(pathLog.orElse(FileSystems.getDefault().getPath("MuxTunnel.log")));
+            SimpleLogger.setFileOut(pathLog.orElse(FileSystems.getDefault().getPath("MuxTunnel.log")));
 
         return pathConfig.orElse(FileSystems.getDefault().getPath("MuxTunnel.cfg"));
-    }
-
-    private static void logOut(Path pathLog) throws IOException
-    {
-        final OutputStream fileOut = new BufferedOutputStream(Channels.newOutputStream(FileChannel.open(pathLog, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)));
-
-        System.setOut(new PrintStream(new OutputStream()
-        {
-
-            final OutputStream original = System.out;
-
-            @Override
-            public void close() throws IOException
-            {
-                original.close();
-                fileOut.close();
-            }
-
-            @Override
-            public void flush() throws IOException
-            {
-                original.flush();
-                fileOut.flush();
-            }
-
-            @Override
-            public void write(byte b[]) throws IOException
-            {
-                original.write(b);
-                fileOut.write(b);
-            }
-
-            @Override
-            public void write(byte b[], int off, int len) throws IOException
-            {
-                original.write(b, off, len);
-                fileOut.write(b, off, len);
-            }
-
-            @Override
-            public void write(int b) throws IOException
-            {
-                original.write(b);
-                fileOut.write(b);
-            }
-
-        }, true, StandardCharsets.UTF_8.name()));
-
-        System.setErr(new PrintStream(new OutputStream()
-        {
-
-            final OutputStream original = System.err;
-
-            @Override
-            public void close() throws IOException
-            {
-                original.close();
-                fileOut.close();
-            }
-
-            @Override
-            public void flush() throws IOException
-            {
-                original.flush();
-                fileOut.flush();
-            }
-
-            @Override
-            public void write(byte b[]) throws IOException
-            {
-                original.write(b);
-                fileOut.write(b);
-            }
-
-            @Override
-            public void write(byte b[], int off, int len) throws IOException
-            {
-                original.write(b, off, len);
-                fileOut.write(b, off, len);
-            }
-
-            @Override
-            public void write(int b) throws IOException
-            {
-                original.write(b);
-                fileOut.write(b);
-            }
-
-        }, true, StandardCharsets.UTF_8.name()));
     }
 
     public static void main(String[] args) throws Exception
     {
         try (BufferedReader in = Files.newBufferedReader(init(args)))
         {
-            System.out.println(String.format("%s > Loading config...", Shared.printNow()));
+            SimpleLogger.println("%s > Loading config...", Shared.printNow());
             in.lines().map(String::trim).filter(App::nonCommentLine).filter(App::validConfigLine).forEach(line -> {
                 int i = line.indexOf("=");
                 String name = line.substring(0, i).trim();
                 String value = line.substring(i + 1).trim();
                 if ("profile".equals(name))
-                    profile = value;
+                {
+                    if ("Global".equals(value))
+                        SimpleLogger.println("%s > Ignored \"profile = %s\", \"%s\" is a reserved name.", Shared.printNow(), value, value);
+                    else
+                        profile = value;
+                }
                 else if ("bindAddress".equals(name))
                 {
                     int i1 = value.lastIndexOf(":");
                     String host = value.substring(0, i1);
                     int port = Integer.parseInt(value.substring(i1 + 1));
                     getConfig(profile).bindAddress = new InetSocketAddress(host, port);
-                    System.out.println(String.format("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "bindAddress", getConfig(profile).bindAddress.toString()));
+                    SimpleLogger.println("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "bindAddress", getConfig(profile).bindAddress.toString());
                 }
                 else if ("remoteAddress".equals(name))
                 {
@@ -262,7 +201,7 @@ public class App
                     String host = value.substring(0, i1);
                     int port = Integer.parseInt(value.substring(i1 + 1));
                     getConfig(profile).remoteAddress = new InetSocketAddress(host, port);
-                    System.out.println(String.format("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "remoteAddress", getConfig(profile).remoteAddress.toString()));
+                    SimpleLogger.println("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "remoteAddress", getConfig(profile).remoteAddress.toString());
                 }
                 else if ("socks5Proxy".equals(name))
                 {
@@ -271,151 +210,181 @@ public class App
                     int port = Integer.parseInt(value.substring(i1 + 1));
                     SocketAddress proxyAddress = new InetSocketAddress(host, port);
                     getConfig(profile).proxySupplier = () -> new Socks5ProxyHandler(proxyAddress);
-                    System.out.println(String.format("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "proxyAddress(socks5Proxy)", proxyAddress.toString()));
+                    SimpleLogger.println("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "proxyAddress(socks5Proxy)", proxyAddress.toString());
                 }
                 else if ("trustSha1".equals(name))
                 {
                     getConfig(profile).trustSha1.add(value);
-                    System.out.println(String.format("%s > [%s] %s has been added to %s", Shared.printNow(), profile, value, "trustSha1"));
+                    SimpleLogger.println("%s > [%s] %s has been added to %s", Shared.printNow(), profile, value, "trustSha1");
                 }
                 else if ("ciphers".equals(name))
                 {
                     List<String> toAdd = Arrays.asList(value.split(":"));
                     getConfig(profile).ciphers.addAll(toAdd);
                     for (String c : toAdd)
-                        System.out.println(String.format("%s > [%s] %s has been added to %s", Shared.printNow(), profile, c, "ciphers"));
+                        SimpleLogger.println("%s > [%s] %s has been added to %s", Shared.printNow(), profile, c, "ciphers");
                 }
                 else if ("protocols".equals(name))
                 {
                     List<String> toAdd = Arrays.asList(value.split(":"));
                     getConfig(profile).protocols.addAll(toAdd);
                     for (String c : toAdd)
-                        System.out.println(String.format("%s > [%s] %s has been added to %s", Shared.printNow(), profile, c, "protocols"));
+                        SimpleLogger.println("%s > [%s] %s has been added to %s", Shared.printNow(), profile, c, "protocols");
                 }
                 else if ("targetAddress".equals(name))
                 {
                     getConfig(profile).targetAddress = UUID.fromString(value);
-                    System.out.println(String.format("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "targetAddress", getConfig(profile).targetAddress.toString()));
+                    SimpleLogger.println("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "targetAddress", getConfig(profile).targetAddress.toString());
                 }
                 else if ("pathSecret".equals(name))
                 {
                     getConfig(profile).pathSecret = FileSystems.getDefault().getPath(value);
-                    System.out.println(String.format("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "pathSecret", getConfig(profile).pathSecret.toString()));
+                    SimpleLogger.println("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "pathSecret", getConfig(profile).pathSecret.toString());
                 }
                 else if ("pathSecret_3".equals(name))
                 {
                     getConfig(profile).pathSecret_3 = FileSystems.getDefault().getPath(value);
-                    System.out.println(String.format("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "pathSecret_3", getConfig(profile).pathSecret_3.toString()));
+                    SimpleLogger.println("%s > [%s] %s has been set to %s", Shared.printNow(), profile, "pathSecret_3", getConfig(profile).pathSecret_3.toString());
                 }
                 else if ("numLinks".equals(name))
                 {
                     getConfig(profile).numLinks = Integer.parseInt(value);
-                    System.out.println(String.format("%s > [%s] %s has been set to %d", Shared.printNow(), profile, "numLinks", getConfig(profile).numLinks));
+                    SimpleLogger.println("%s > [%s] %s has been set to %d", Shared.printNow(), profile, "numLinks", getConfig(profile).numLinks);
                 }
                 else if ("limitOpen".equals(name))
                 {
                     getConfig(profile).limitOpen = Integer.parseInt(value);
-                    System.out.println(String.format("%s > [%s] %s has been set to %d", Shared.printNow(), profile, "limitOpen", getConfig(profile).limitOpen));
+                    SimpleLogger.println("%s > [%s] %s has been set to %d", Shared.printNow(), profile, "limitOpen", getConfig(profile).limitOpen);
                 }
                 else if ("maxCLF".equals(name))
                 {
                     getConfig(profile).maxCLF = Integer.parseInt(value);
-                    System.out.println(String.format("%s > [%s] %s has been set to %d", Shared.printNow(), profile, "maxCLF", getConfig(profile).maxCLF));
+                    SimpleLogger.println("%s > [%s] %s has been set to %d", Shared.printNow(), profile, "maxCLF", getConfig(profile).maxCLF);
+                }
+                else if ("writeLimit".equals(name))
+                {
+                    getConfig(profile).writeLimit = Long.parseLong(value);
+                    SimpleLogger.println("%s > [%s] %s has been set to %d", Shared.printNow(), profile, "writeLimit", getConfig(profile).writeLimit);
+                }
+                else if ("readLimit".equals(name))
+                {
+                    getConfig(profile).readLimit = Long.parseLong(value);
+                    SimpleLogger.println("%s > [%s] %s has been set to %d", Shared.printNow(), profile, "readLimit", getConfig(profile).readLimit);
+                }
+                else if ("globalWriteLimit".equals(name))
+                {
+                    globalWriteLimit = Long.parseLong(value);
+                    SimpleLogger.println("%s > [%s] %s has been set to %d", Shared.printNow(), "Global", "globalWriteLimit", globalWriteLimit);
+                }
+                else if ("globalReadLimit".equals(name))
+                {
+                    globalReadLimit = Long.parseLong(value);
+                    SimpleLogger.println("%s > [%s] %s has been set to %d", Shared.printNow(), "Global", "globalReadLimit", globalReadLimit);
                 }
             });
-            System.out.println(String.format("%s > Done.", Shared.printNow()));
+            SimpleLogger.println("%s > Done.", Shared.printNow());
 
-            System.out.println();
-            System.out.println(String.format("%s > Checking config...", Shared.printNow()));
+            SimpleLogger.println();
+            SimpleLogger.println("%s > Checking config...", Shared.printNow());
             boolean failed = false;
-            for (SinglePointConfig config : configs.values())
+            for (SinglePointTempConfig config : configs.values())
             {
                 if (config.bindAddress == null)
                 {
-                    System.out.println(String.format("%s > [%s] Missing %s", Shared.printNow(), config.name, "bindAddress"));
+                    SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "bindAddress");
                     failed = true;
                 }
                 if (config.remoteAddress == null)
                 {
-                    System.out.println(String.format("%s > [%s] Missing %s", Shared.printNow(), config.name, "remoteAddress"));
+                    SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "remoteAddress");
                     failed = true;
                 }
                 if (config.proxySupplier == null)
                 {
-                    System.out.println(String.format("%s > [%s] Missing %s", Shared.printNow(), config.name, "proxyAddress(socks5Proxy)"));
+                    SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "proxyAddress(socks5Proxy)");
                     failed = true;
                 }
                 if (config.trustSha1.isEmpty())
                 {
-                    System.out.println(String.format("%s > [%s] Missing %s", Shared.printNow(), config.name, "trustSha1"));
+                    SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "trustSha1");
                     failed = true;
                 }
                 if (config.targetAddress == null)
                 {
-                    System.out.println(String.format("%s > [%s] Missing %s", Shared.printNow(), config.name, "targetAddress"));
+                    SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "targetAddress");
                     failed = true;
                 }
                 if (config.pathSecret == null && config.pathSecret_3 == null)
                 {
-                    System.out.println(String.format("%s > [%s] Missing %s and %s", Shared.printNow(), config.name, "pathSecret", "pathSecret_3"));
+                    SimpleLogger.println("%s > [%s] Missing %s and %s", Shared.printNow(), config.name, "pathSecret", "pathSecret_3");
                     failed = true;
                 }
                 if (config.numLinks < 1)
                 {
-                    System.out.println(String.format("%s > [%s] Invalid %s", Shared.printNow(), config.name, "numLinks"));
+                    SimpleLogger.println("%s > [%s] Invalid %s", Shared.printNow(), config.name, "numLinks");
                     failed = true;
                 }
                 if (config.limitOpen < 1)
                 {
-                    System.out.println(String.format("%s > [%s] Invalid %s", Shared.printNow(), config.name, "limitOpen"));
+                    SimpleLogger.println("%s > [%s] Invalid %s", Shared.printNow(), config.name, "limitOpen");
                     failed = true;
                 }
                 if (config.maxCLF < 0)
                 {
-                    System.out.println(String.format("%s > [%s] Invalid %s", Shared.printNow(), config.name, "maxCLF"));
+                    SimpleLogger.println("%s > [%s] Invalid %s", Shared.printNow(), config.name, "maxCLF");
+                    failed = true;
+                }
+                if (config.writeLimit < 0L)
+                {
+                    SimpleLogger.println("%s > [%s] Invalid %s", Shared.printNow(), config.name, "writeLimit");
+                    failed = true;
+                }
+                if (config.readLimit < 0L)
+                {
+                    SimpleLogger.println("%s > [%s] Invalid %s", Shared.printNow(), config.name, "readLimit");
                     failed = true;
                 }
             }
+            if (globalWriteLimit < 0L)
+            {
+                SimpleLogger.println("%s > [%s] Invalid %s", Shared.printNow(), "Global", "globalWriteLimit");
+                failed = true;
+            }
+            if (globalReadLimit < 0L)
+            {
+                SimpleLogger.println("%s > [%s] Invalid %s", Shared.printNow(), "Global", "globalReadLimit");
+                failed = true;
+            }
             if (failed)
             {
-                System.out.println(String.format("%s > Invalid config, Exit now.", Shared.printNow()));
+                SimpleLogger.println("%s > Invalid config, Exit now.", Shared.printNow());
                 System.exit(1);
             }
-            System.out.println(String.format("%s > Done.", Shared.printNow()));
+            SinglePointConfig.setGlobalWriteReadLimit(globalWriteLimit, globalReadLimit);
+            SimpleLogger.println("%s > Done.", Shared.printNow());
 
-            System.out.println();
-            System.out.println(String.format("%s > Building SSLContext...", Shared.printNow()));
-            for (SinglePointConfig config : configs.values())
-                config.sslCtx = SslContextBuilder.forClient().trustManager(new FingerprintTrustManagerFactory(config.trustSha1)).ciphers(!config.ciphers.isEmpty() ? config.ciphers : null, SupportedCipherSuiteFilter.INSTANCE).protocols(!config.protocols.isEmpty() ? config.protocols : null).build();
-            System.out.println(String.format("%s > Done.", Shared.printNow()));
+            SimpleLogger.println();
+            SimpleLogger.println("%s > Building SSLContext...", Shared.printNow());
+            for (SinglePointTempConfig config : configs.values())
+                config.sslCtx = SslContextBuilder.forClient().trustManager(new FingerprintTrustManagerFactory(config.trustSha1)).ciphers(!config.ciphers.isEmpty() ? config.ciphers : Shared.TLS.defaultCipherSuites, SupportedCipherSuiteFilter.INSTANCE).protocols(!config.protocols.isEmpty() ? config.protocols : Shared.TLS.defaultProtocols).build();
+            SimpleLogger.println("%s > Done.", Shared.printNow());
 
-            System.out.println();
-            System.out.println(String.format("%s > Generating Secret...", Shared.printNow()));
-            for (SinglePointConfig config : configs.values())
+            SimpleLogger.println();
+            SimpleLogger.println("%s > Generating Secret...", Shared.printNow());
+            for (SinglePointTempConfig config : configs.values())
             {
                 config.secret = generateSecret(config.pathSecret, Shared.magic);
                 config.secret_3 = generateSecret_3(config.pathSecret_3 != null ? config.pathSecret_3 : config.pathSecret, Shared.magic);
             }
-            System.out.println(String.format("%s > Done.", Shared.printNow()));
+            SimpleLogger.println("%s > Done.", Shared.printNow());
         }
 
-        System.out.println();
-        System.out.println(String.format("%s > Starting...", Shared.printNow()));
-        for (SinglePointConfig config : configs.values())
-            points.add(new SinglePoint(
-                    config.bindAddress,
-                    config.remoteAddress,
-                    config.proxySupplier,
-                    config.sslCtx,
-                    config.targetAddress,
-                    config.secret,
-                    config.secret_3,
-                    config.numLinks,
-                    config.limitOpen,
-                    config.maxCLF,
-                    config.name));
-        System.out.println(String.format("%s > Done. %s", Shared.printNow(), points.toString()));
-        System.out.println();
+        SimpleLogger.println();
+        SimpleLogger.println("%s > Starting...", Shared.printNow());
+        points.addAll(configs.values().stream().map(SinglePointTempConfig::finish).map(SinglePoint::new).collect(Collectors.toList()));
+        points.stream().map(SinglePoint::start).collect(Collectors.toList()).forEach(Future::syncUninterruptibly);
+        SimpleLogger.println("%s > Done. %s", Shared.printNow(), points.toString());
+        SimpleLogger.println();
 
         configs = null;
         profile = null;
@@ -426,14 +395,15 @@ public class App
             @Override
             public void run()
             {
-                System.out.println();
-                System.out.println(String.format("%s > Shutting down...", Shared.printNow()));
-                Shared.NettyObjects.bossGroup.shutdownGracefully().syncUninterruptibly();
-                Shared.NettyObjects.workerGroup.shutdownGracefully().syncUninterruptibly();
-                for (SinglePoint point : points)
-                    point.getChannels().close().syncUninterruptibly();
-                System.out.println(String.format("%s > Done.", Shared.printNow()));
-                System.out.println();
+                SimpleLogger.println();
+                SimpleLogger.println("%s > Shutting down...", Shared.printNow());
+                List<Future<?>> futures = new ArrayList<>();
+                futures.add(Shared.NettyObjects.bossGroup.shutdownGracefully());
+                futures.add(Shared.NettyObjects.workerGroup.shutdownGracefully());
+                futures.addAll(points.stream().map(SinglePoint::stop).collect(Collectors.toList()));
+                futures.forEach(Future::syncUninterruptibly);
+                SimpleLogger.println("%s > Done.", Shared.printNow());
+                SimpleLogger.println();
             }
 
         });
