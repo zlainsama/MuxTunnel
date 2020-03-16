@@ -26,6 +26,7 @@ import io.netty.util.concurrent.ScheduledFuture;
 import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.Message;
 import me.lain.muxtun.codec.Message.MessageType;
+import me.lain.muxtun.codec.SnappyCodec;
 import me.lain.muxtun.util.SimpleLogger;
 
 public class SinglePoint
@@ -122,6 +123,10 @@ public class SinglePoint
                 }
                 else
                 {
+                    linkChannel.writeAndFlush(new Message()
+                            .setType(MessageType.Snappy));
+                    linkChannel.pipeline().addBefore("FrameCodec", "SnappyCodec", new SnappyCodec());
+
                     links.add(linkChannel);
                     pendingLinks.updateAndGet(decrementIfPositive);
 

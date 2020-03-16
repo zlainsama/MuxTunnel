@@ -59,8 +59,8 @@ class LinkInitializer extends ChannelInitializer<SocketChannel>
         ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
         ch.pipeline().addLast(config.proxySupplier.get());
         ch.pipeline().addLast(config.sslCtx.newHandler(ch.alloc()));
-        ch.pipeline().addLast(new FrameCodec());
-        ch.pipeline().addLast(MessageCodec.DEFAULT);
+        ch.pipeline().addLast("FrameCodec", new FrameCodec());
+        ch.pipeline().addLast("MessageCodec", MessageCodec.DEFAULT);
         ch.pipeline().addLast(LinkWriteMonitor.DEFAULT);
         ch.pipeline().addLast(LinkInboundHandler.DEFAULT);
         ch.pipeline().addLast(LinkWritabilityChangeListener.DEFAULT);

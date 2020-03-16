@@ -12,6 +12,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.ReferenceCountUtil;
 import me.lain.muxtun.codec.Message;
 import me.lain.muxtun.codec.Message.MessageType;
+import me.lain.muxtun.codec.SnappyCodec;
 
 @Sharable
 class LinkInboundHandler extends ChannelInboundHandlerAdapter
@@ -212,6 +213,18 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                         {
                             ctx.close();
                         }
+                    }
+                    else
+                    {
+                        ctx.close();
+                    }
+                    break;
+                }
+                case Snappy:
+                {
+                    if (session.authStatus.completed)
+                    {
+                        ctx.pipeline().addBefore("FrameCodec", "SnappyCodec", new SnappyCodec());
                     }
                     else
                     {
