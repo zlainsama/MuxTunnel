@@ -47,6 +47,8 @@ public class SinglePoint
     private final UDPStreamInitializer udpStreamInitializer;
     private final Queue<RelayRequest> tcpRelayRequestQueue;
     private final Queue<RelayRequest> udpRelayRequestQueue;
+    private final Queue<PendingOpenDrop> tcpPendingOpenDropQueue;
+    private final Queue<PendingOpenDrop> udpPendingOpenDropQueue;
     private final Runnable taskMaintainLinks;
     private final Runnable taskTryOpenTCP;
     private final Runnable taskTryOpenUDP;
@@ -63,6 +65,8 @@ public class SinglePoint
         this.udpStreamInitializer = new UDPStreamInitializer(new UDPStreamInboundHandler(channels, this::enqueueUDPStream));
         this.tcpRelayRequestQueue = new ConcurrentLinkedQueue<>();
         this.udpRelayRequestQueue = new ConcurrentLinkedQueue<>();
+        this.tcpPendingOpenDropQueue = new ConcurrentLinkedQueue<>();
+        this.udpPendingOpenDropQueue = new ConcurrentLinkedQueue<>();
         this.taskMaintainLinks = newTaskMaintainLinks();
         this.taskTryOpenTCP = newTaskTryOpenTCP();
         this.taskTryOpenUDP = newTaskTryOpenUDP();
@@ -72,6 +76,17 @@ public class SinglePoint
     private RelayRequest enqueueTCPStream(Channel tcpStream)
     {
         RelayRequest request = new RelayRequest(tcpStream.eventLoop());
+
+        PendingOpenDrop pendingOpenDrop;
+        while ((pendingOpenDrop = tcpPendingOpenDropQueue.poll()) != null)
+        {
+            if (!pendingOpenDrop.scheduledDrop.cancel(false))
+                continue;
+            if (request.trySuccess(pendingOpenDrop.result))
+                return request;
+            pendingOpenDrop.dropStream.run();
+        }
+
         if (!tcpRelayRequestQueue.offer(request))
             request.tryFailure(new IllegalStateException());
         else if (!request.isDone())
@@ -90,6 +105,17 @@ public class SinglePoint
     private RelayRequest enqueueUDPStream(Channel udpStream)
     {
         RelayRequest request = new RelayRequest(udpStream.eventLoop());
+
+        PendingOpenDrop pendingOpenDrop;
+        while ((pendingOpenDrop = udpPendingOpenDropQueue.poll()) != null)
+        {
+            if (!pendingOpenDrop.scheduledDrop.cancel(false))
+                continue;
+            if (request.trySuccess(pendingOpenDrop.result))
+                return request;
+            pendingOpenDrop.dropStream.run();
+        }
+
         if (!udpRelayRequestQueue.offer(request))
             request.tryFailure(new IllegalStateException());
         else if (!request.isDone())
@@ -171,23 +197,32 @@ public class SinglePoint
                 }
                 else
                 {
-                    RelayRequest request = null;
-                    while (!tcpRelayRequestQueue.isEmpty())
+                    RelayRequest request;
+                    while ((request = tcpRelayRequestQueue.poll()) != null)
                     {
-                        request = tcpRelayRequestQueue.poll();
-                        if (request != null && !request.setUncancellable())
+                        if (!request.setUncancellable())
                             continue;
                         break;
                     }
 
-                    if (request == null || request.isDone() || !request.trySuccess(new RelayRequestResult(linkChannel, session, event.streamId)))
+                    RelayRequestResult result = new RelayRequestResult(linkChannel, session, event.streamId);
+                    if (request == null || request.isDone() || !request.trySuccess(result))
                     {
-                        linkChannel.writeAndFlush(new Message()
-                                .setType(MessageType.Drop)
-                                .setStreamId(event.streamId));
-                    }
+                        Runnable dropStream = () -> {
+                            linkChannel.writeAndFlush(new Message()
+                                    .setType(MessageType.Drop)
+                                    .setStreamId(event.streamId));
+                            session.pendingOpen.updateAndGet(decrementIfPositive);
+                        };
+                        ScheduledFuture<?> scheduledDrop = linkChannel.eventLoop().schedule(dropStream, 1L, TimeUnit.SECONDS);
 
-                    session.pendingOpen.updateAndGet(decrementIfPositive);
+                        if (!tcpPendingOpenDropQueue.offer(new PendingOpenDrop(result, dropStream, scheduledDrop)) && scheduledDrop.cancel(false))
+                            dropStream.run();
+                    }
+                    else
+                    {
+                        session.pendingOpen.updateAndGet(decrementIfPositive);
+                    }
                 }
                 break;
             }
@@ -210,23 +245,32 @@ public class SinglePoint
                 }
                 else
                 {
-                    RelayRequest request = null;
-                    while (!udpRelayRequestQueue.isEmpty())
+                    RelayRequest request;
+                    while ((request = udpRelayRequestQueue.poll()) != null)
                     {
-                        request = udpRelayRequestQueue.poll();
-                        if (request != null && !request.setUncancellable())
+                        if (!request.setUncancellable())
                             continue;
                         break;
                     }
 
-                    if (request == null || request.isDone() || !request.trySuccess(new RelayRequestResult(linkChannel, session, event.streamId)))
+                    RelayRequestResult result = new RelayRequestResult(linkChannel, session, event.streamId);
+                    if (request == null || request.isDone() || !request.trySuccess(result))
                     {
-                        linkChannel.writeAndFlush(new Message()
-                                .setType(MessageType.Drop)
-                                .setStreamId(event.streamId));
-                    }
+                        Runnable dropStream = () -> {
+                            linkChannel.writeAndFlush(new Message()
+                                    .setType(MessageType.Drop)
+                                    .setStreamId(event.streamId));
+                            session.pendingOpen.updateAndGet(decrementIfPositive);
+                        };
+                        ScheduledFuture<?> scheduledDrop = linkChannel.eventLoop().schedule(dropStream, 1L, TimeUnit.SECONDS);
 
-                    session.pendingOpen.updateAndGet(decrementIfPositive);
+                        if (!udpPendingOpenDropQueue.offer(new PendingOpenDrop(result, dropStream, scheduledDrop)) && scheduledDrop.cancel(false))
+                            dropStream.run();
+                    }
+                    else
+                    {
+                        session.pendingOpen.updateAndGet(decrementIfPositive);
+                    }
                 }
                 break;
             }

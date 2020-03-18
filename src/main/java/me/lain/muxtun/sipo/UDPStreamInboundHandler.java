@@ -138,86 +138,68 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
             Queue<PendingWrite> outTail = new ConcurrentLinkedQueue<>();
 
             Head.closeFuture().addListener(future -> {
-                while (!inHead.isEmpty())
+                PendingWrite pending;
+                while ((pending = inHead.poll()) != null)
                 {
-                    PendingWrite pending = inHead.poll();
-
-                    if (pending != null)
+                    try
                     {
-                        try
-                        {
-                            if (!pending.promise.isVoid())
-                                pending.promise.tryFailure(new ClosedChannelException());
-                        }
-                        catch (Exception e)
-                        {
-                        }
-                        finally
-                        {
-                            pending.msg.release();
-                        }
+                        if (!pending.promise.isVoid())
+                            pending.promise.tryFailure(new ClosedChannelException());
+                    }
+                    catch (Exception e)
+                    {
+                    }
+                    finally
+                    {
+                        pending.msg.release();
                     }
                 }
-                while (!outHead.isEmpty())
+                while ((pending = outHead.poll()) != null)
                 {
-                    PendingWrite pending = outHead.poll();
-
-                    if (pending != null)
+                    try
                     {
-                        try
-                        {
-                            if (!pending.promise.isVoid())
-                                pending.promise.tryFailure(new ClosedChannelException());
-                        }
-                        catch (Exception e)
-                        {
-                        }
-                        finally
-                        {
-                            pending.msg.release();
-                        }
+                        if (!pending.promise.isVoid())
+                            pending.promise.tryFailure(new ClosedChannelException());
+                    }
+                    catch (Exception e)
+                    {
+                    }
+                    finally
+                    {
+                        pending.msg.release();
                     }
                 }
             });
             Tail.closeFuture().addListener(future -> {
-                while (!inTail.isEmpty())
+                PendingWrite pending;
+                while ((pending = inTail.poll()) != null)
                 {
-                    PendingWrite pending = inTail.poll();
-
-                    if (pending != null)
+                    try
                     {
-                        try
-                        {
-                            if (!pending.promise.isVoid())
-                                pending.promise.tryFailure(new ClosedChannelException());
-                        }
-                        catch (Exception e)
-                        {
-                        }
-                        finally
-                        {
-                            pending.msg.release();
-                        }
+                        if (!pending.promise.isVoid())
+                            pending.promise.tryFailure(new ClosedChannelException());
+                    }
+                    catch (Exception e)
+                    {
+                    }
+                    finally
+                    {
+                        pending.msg.release();
                     }
                 }
-                while (!outTail.isEmpty())
+                while ((pending = outTail.poll()) != null)
                 {
-                    PendingWrite pending = outTail.poll();
-
-                    if (pending != null)
+                    try
                     {
-                        try
-                        {
-                            if (!pending.promise.isVoid())
-                                pending.promise.tryFailure(new ClosedChannelException());
-                        }
-                        catch (Exception e)
-                        {
-                        }
-                        finally
-                        {
-                            pending.msg.release();
-                        }
+                        if (!pending.promise.isVoid())
+                            pending.promise.tryFailure(new ClosedChannelException());
+                    }
+                    catch (Exception e)
+                    {
+                    }
+                    finally
+                    {
+                        pending.msg.release();
                     }
                 }
             });
@@ -242,28 +224,25 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
                 @Override
                 public void flush(ChannelHandlerContext ctx) throws Exception
                 {
-                    while (!outHead.isEmpty())
+                    PendingWrite pending;
+                    while ((pending = outHead.poll()) != null)
                     {
-                        PendingWrite pending = outHead.poll();
-                        if (pending != null)
-                        {
-                            boolean release = true;
+                        boolean release = true;
 
-                            try
-                            {
-                                inTail.add(pending);
-                                release = false;
-                            }
-                            catch (Exception e)
-                            {
-                                if (!pending.promise.isVoid())
-                                    pending.promise.tryFailure(e);
-                            }
-                            finally
-                            {
-                                if (release)
-                                    pending.msg.release();
-                            }
+                        try
+                        {
+                            inTail.add(pending);
+                            release = false;
+                        }
+                        catch (Exception e)
+                        {
+                            if (!pending.promise.isVoid())
+                                pending.promise.tryFailure(e);
+                        }
+                        finally
+                        {
+                            if (release)
+                                pending.msg.release();
                         }
                     }
 
@@ -274,30 +253,27 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
                 @Override
                 public void read(ChannelHandlerContext ctx) throws Exception
                 {
-                    if (!inHead.isEmpty())
+                    PendingWrite pending;
+                    if ((pending = inHead.poll()) != null)
                     {
-                        PendingWrite pending = inHead.poll();
-                        if (pending != null)
-                        {
-                            boolean release = true;
+                        boolean release = true;
 
-                            try
-                            {
-                                Head.writeInbound(pending.msg);
-                                release = false;
-                                if (!pending.promise.isVoid())
-                                    pending.promise.trySuccess();
-                            }
-                            catch (Exception e)
-                            {
-                                if (!pending.promise.isVoid())
-                                    pending.promise.tryFailure(e);
-                            }
-                            finally
-                            {
-                                if (release)
-                                    pending.msg.release();
-                            }
+                        try
+                        {
+                            Head.writeInbound(pending.msg);
+                            release = false;
+                            if (!pending.promise.isVoid())
+                                pending.promise.trySuccess();
+                        }
+                        catch (Exception e)
+                        {
+                            if (!pending.promise.isVoid())
+                                pending.promise.tryFailure(e);
+                        }
+                        finally
+                        {
+                            if (release)
+                                pending.msg.release();
                         }
                     }
                 }
@@ -333,7 +309,7 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
                 {
                     try
                     {
-                        if (!writerTail.write(((ByteBuf) msg).retain()))
+                        if (!writerTail.writeSlices(((ByteBuf) msg).retain(), 1048576, null))
                             ctx.close();
                     }
                     finally
@@ -345,28 +321,25 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
                 @Override
                 public void flush(ChannelHandlerContext ctx) throws Exception
                 {
-                    while (!outTail.isEmpty())
+                    PendingWrite pending;
+                    while ((pending = outTail.poll()) != null)
                     {
-                        PendingWrite pending = outTail.poll();
-                        if (pending != null)
-                        {
-                            boolean release = true;
+                        boolean release = true;
 
-                            try
-                            {
-                                inHead.add(pending);
-                                release = false;
-                            }
-                            catch (Exception e)
-                            {
-                                if (!pending.promise.isVoid())
-                                    pending.promise.tryFailure(e);
-                            }
-                            finally
-                            {
-                                if (release)
-                                    pending.msg.release();
-                            }
+                        try
+                        {
+                            inHead.add(pending);
+                            release = false;
+                        }
+                        catch (Exception e)
+                        {
+                            if (!pending.promise.isVoid())
+                                pending.promise.tryFailure(e);
+                        }
+                        finally
+                        {
+                            if (release)
+                                pending.msg.release();
                         }
                     }
 
@@ -377,30 +350,27 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
                 @Override
                 public void read(ChannelHandlerContext ctx) throws Exception
                 {
-                    if (!inTail.isEmpty())
+                    PendingWrite pending;
+                    if ((pending = inTail.poll()) != null)
                     {
-                        PendingWrite pending = inTail.poll();
-                        if (pending != null)
-                        {
-                            boolean release = true;
+                        boolean release = true;
 
-                            try
-                            {
-                                Tail.writeInbound(pending.msg);
-                                release = false;
-                                if (!pending.promise.isVoid())
-                                    pending.promise.trySuccess();
-                            }
-                            catch (Exception e)
-                            {
-                                if (!pending.promise.isVoid())
-                                    pending.promise.tryFailure(e);
-                            }
-                            finally
-                            {
-                                if (release)
-                                    pending.msg.release();
-                            }
+                        try
+                        {
+                            Tail.writeInbound(pending.msg);
+                            release = false;
+                            if (!pending.promise.isVoid())
+                                pending.promise.trySuccess();
+                        }
+                        catch (Exception e)
+                        {
+                            if (!pending.promise.isVoid())
+                                pending.promise.tryFailure(e);
+                        }
+                        finally
+                        {
+                            if (release)
+                                pending.msg.release();
                         }
                     }
                 }
