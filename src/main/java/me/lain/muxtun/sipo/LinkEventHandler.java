@@ -6,7 +6,6 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
-import me.lain.muxtun.codec.Message;
 import me.lain.muxtun.codec.Message.MessageType;
 
 @Sharable
@@ -26,8 +25,7 @@ class LinkEventHandler extends ChannelInboundHandlerAdapter
         {
             if (ctx.channel().attr(Vars.SESSION_KEY).get().authStatus.completed)
             {
-                ctx.writeAndFlush(new Message()
-                        .setType(MessageType.Ping));
+                ctx.writeAndFlush(MessageType.PING.create());
             }
             else
             {

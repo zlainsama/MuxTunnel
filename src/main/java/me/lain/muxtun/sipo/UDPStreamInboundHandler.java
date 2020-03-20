@@ -21,7 +21,6 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.util.ReferenceCountUtil;
-import me.lain.muxtun.codec.Message;
 import me.lain.muxtun.codec.Message.MessageType;
 
 @Sharable
@@ -117,10 +116,7 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
                     UUID streamId = boundId.get();
                     if (streamId == null)
                         return false;
-                    link.writeAndFlush(new Message()
-                            .setType(MessageType.Data)
-                            .setStreamId(streamId)
-                            .setPayload(payload.retain()));
+                    link.writeAndFlush(MessageType.DATA.create().setStreamId(streamId).setPayload(payload.retain()));
                     return true;
                 }
                 finally
@@ -420,9 +416,7 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
                     result.session.ongoingStreams.put(result.streamId, Tail);
                     Tail.closeFuture().addListener(closeFuture -> {
                         if (result.linkChannel.isActive() && result.session.ongoingStreams.remove(result.streamId) == Tail)
-                            result.linkChannel.writeAndFlush(new Message()
-                                    .setType(MessageType.Drop)
-                                    .setStreamId(result.streamId));
+                            result.linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(result.streamId));
                     });
                     Tail.config().setAutoRead(true);
                 }

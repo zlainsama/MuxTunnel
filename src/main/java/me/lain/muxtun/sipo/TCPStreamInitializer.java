@@ -10,7 +10,6 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.flush.FlushConsolidationHandler;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import io.netty.util.ReferenceCountUtil;
-import me.lain.muxtun.codec.Message;
 import me.lain.muxtun.codec.Message.MessageType;
 
 @Sharable
@@ -48,10 +47,7 @@ class TCPStreamInitializer extends ChannelInitializer<SocketChannel>
                     {
                         if (!result.linkChannel.isActive())
                             return false;
-                        result.linkChannel.writeAndFlush(new Message()
-                                .setType(MessageType.Data)
-                                .setStreamId(result.streamId)
-                                .setPayload(payload.retain()));
+                        result.linkChannel.writeAndFlush(MessageType.DATA.create().setStreamId(result.streamId).setPayload(payload.retain()));
                         return true;
                     }
                     finally
@@ -61,9 +57,7 @@ class TCPStreamInitializer extends ChannelInitializer<SocketChannel>
                 });
                 ch.closeFuture().addListener(closeFuture -> {
                     if (result.linkChannel.isActive() && result.session.ongoingStreams.remove(result.streamId) == ch)
-                        result.linkChannel.writeAndFlush(new Message()
-                                .setType(MessageType.Drop)
-                                .setStreamId(result.streamId));
+                        result.linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(result.streamId));
                 });
                 ch.config().setAutoRead(true);
             }

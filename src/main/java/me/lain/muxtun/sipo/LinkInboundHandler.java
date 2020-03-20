@@ -33,7 +33,7 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
             }
             finally
             {
-                ReferenceCountUtil.release(cast.getPayload());
+                ReferenceCountUtil.release(cast);
             }
         }
         else
@@ -55,13 +55,13 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
         {
             LinkSession session = ctx.channel().attr(Vars.SESSION_KEY).get();
 
-            switch (msg.getType())
+            switch (msg.type())
             {
-                case Ping:
+                case PING:
                 {
                     if (session.authStatus.completed)
                     {
-                        ctx.fireUserEventTriggered(new LinkSessionEvent(LinkSessionEventType.Ping, session.clf.completeCalculation().orElse(true)));
+                        ctx.fireUserEventTriggered(new LinkSessionEvent(LinkSessionEventType.PING, session.clf.completeCalculation().orElse(true)));
                     }
                     else
                     {
@@ -69,13 +69,13 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                     }
                     break;
                 }
-                case Open:
+                case OPEN:
                 {
                     if (session.authStatus.completed)
                     {
                         UUID streamId = msg.getStreamId();
 
-                        ctx.fireUserEventTriggered(new LinkSessionEvent(LinkSessionEventType.Open, streamId, session.clf.completeCalculation().orElse(false)));
+                        ctx.fireUserEventTriggered(new LinkSessionEvent(LinkSessionEventType.OPEN, streamId, session.clf.completeCalculation().orElse(false)));
                     }
                     else
                     {
@@ -83,7 +83,7 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                     }
                     break;
                 }
-                case Data:
+                case DATA:
                 {
                     if (session.authStatus.completed)
                     {
@@ -100,16 +100,12 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                             else
                             {
                                 session.ongoingStreams.remove(streamId);
-                                ctx.writeAndFlush(new Message()
-                                        .setType(MessageType.Drop)
-                                        .setStreamId(streamId));
+                                ctx.writeAndFlush(MessageType.DROP.create().setStreamId(streamId));
                             }
                         }
                         else
                         {
-                            ctx.writeAndFlush(new Message()
-                                    .setType(MessageType.Drop)
-                                    .setStreamId(streamId));
+                            ctx.writeAndFlush(MessageType.DROP.create().setStreamId(streamId));
                         }
                     }
                     else
@@ -118,7 +114,7 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                     }
                     break;
                 }
-                case Drop:
+                case DROP:
                 {
                     if (session.authStatus.completed)
                     {
@@ -131,7 +127,7 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                         }
                         else if (session.targetAddress.equals(streamId))
                         {
-                            ctx.fireUserEventTriggered(new LinkSessionEvent(LinkSessionEventType.OpenFailed, streamId, session.clf.completeCalculation().orElse(false)));
+                            ctx.fireUserEventTriggered(new LinkSessionEvent(LinkSessionEventType.OPENFAILED, streamId, session.clf.completeCalculation().orElse(false)));
                         }
                     }
                     else
@@ -140,13 +136,13 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                     }
                     break;
                 }
-                case OpenUDP:
+                case OPENUDP:
                 {
                     if (session.authStatus.completed)
                     {
                         UUID streamId = msg.getStreamId();
 
-                        ctx.fireUserEventTriggered(new LinkSessionEvent(LinkSessionEventType.OpenUDP, streamId, session.clf.completeCalculation().orElse(false)));
+                        ctx.fireUserEventTriggered(new LinkSessionEvent(LinkSessionEventType.OPENUDP, streamId, session.clf.completeCalculation().orElse(false)));
                     }
                     else
                     {
@@ -154,13 +150,13 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                     }
                     break;
                 }
-                case Auth:
+                case AUTH:
                 {
                     if (session.authStatus.initiated && !session.authStatus.completed)
                     {
                         session.authStatus.completed = true;
 
-                        ctx.fireUserEventTriggered(new LinkSessionEvent(LinkSessionEventType.Auth, session.clf.completeCalculation().orElse(true)));
+                        ctx.fireUserEventTriggered(new LinkSessionEvent(LinkSessionEventType.AUTH, session.clf.completeCalculation().orElse(true)));
                     }
                     else
                     {
@@ -168,7 +164,7 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                     }
                     break;
                 }
-                case AuthReq:
+                case AUTHREQ:
                 {
                     if (!session.authStatus.initiated && !session.authStatus.completed)
                     {
@@ -179,9 +175,7 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                         Optional<byte[]> answer = session.challengeGenerator.apply(question);
                         if (answer.isPresent())
                         {
-                            ctx.writeAndFlush(new Message()
-                                    .setType(MessageType.Auth)
-                                    .setPayload(Unpooled.wrappedBuffer(answer.get())));
+                            ctx.writeAndFlush(MessageType.AUTH.create().setPayload(Unpooled.wrappedBuffer(answer.get())));
                         }
                         else
                         {
@@ -194,7 +188,7 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                     }
                     break;
                 }
-                case AuthReq_3:
+                case AUTHREQ3:
                 {
                     if (!session.authStatus.initiated && !session.authStatus.completed)
                     {
@@ -205,9 +199,7 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                         Optional<byte[]> answer = session.challengeGenerator_3.apply(question);
                         if (answer.isPresent())
                         {
-                            ctx.writeAndFlush(new Message()
-                                    .setType(MessageType.Auth)
-                                    .setPayload(Unpooled.wrappedBuffer(answer.get())));
+                            ctx.writeAndFlush(MessageType.AUTH.create().setPayload(Unpooled.wrappedBuffer(answer.get())));
                         }
                         else
                         {
@@ -220,7 +212,7 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                     }
                     break;
                 }
-                case Snappy:
+                case SNAPPY:
                 {
                     if (session.authStatus.completed)
                     {

@@ -20,12 +20,12 @@ class LinkWriteMonitor extends ChannelOutboundHandlerAdapter
 
     private void handleMessageWrite(ChannelHandlerContext ctx, Message msg, ChannelPromise promise) throws Exception
     {
-        switch (msg.getType())
+        switch (msg.type())
         {
-            case Ping:
-            case Open:
-            case OpenUDP:
-            case Auth:
+            case PING:
+            case OPEN:
+            case OPENUDP:
+            case AUTH:
                 promise.addListener(INITIATECONNECTIONLATENCYFACTORCALCULATION);
                 break;
             default:

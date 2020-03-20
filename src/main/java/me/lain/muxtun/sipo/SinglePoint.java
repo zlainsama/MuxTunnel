@@ -140,7 +140,7 @@ public class SinglePoint
     {
         switch (event.type)
         {
-            case Auth:
+            case AUTH:
             {
                 if (event.clfLimitExceeded)
                 {
@@ -149,8 +149,7 @@ public class SinglePoint
                 }
                 else
                 {
-                    linkChannel.writeAndFlush(new Message()
-                            .setType(MessageType.Snappy));
+                    linkChannel.writeAndFlush(MessageType.SNAPPY.create());
                     linkChannel.pipeline().addBefore("FrameCodec", "SnappyCodec", new SnappyCodec());
 
                     links.add(linkChannel);
@@ -178,7 +177,7 @@ public class SinglePoint
                 }
                 break;
             }
-            case Open:
+            case OPEN:
             {
                 if (event.clfLimitExceeded)
                 {
@@ -186,9 +185,7 @@ public class SinglePoint
                         linkChannel.close();
                     else
                     {
-                        linkChannel.writeAndFlush(new Message()
-                                .setType(MessageType.Drop)
-                                .setStreamId(event.streamId));
+                        linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(event.streamId));
                         session.pendingOpen.updateAndGet(decrementIfPositive);
                     }
 
@@ -209,9 +206,7 @@ public class SinglePoint
                     if (request == null || request.isDone() || !request.trySuccess(result))
                     {
                         Runnable dropStream = () -> {
-                            linkChannel.writeAndFlush(new Message()
-                                    .setType(MessageType.Drop)
-                                    .setStreamId(event.streamId));
+                            linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(event.streamId));
                             session.pendingOpen.updateAndGet(decrementIfPositive);
                         };
                         ScheduledFuture<?> scheduledDrop = linkChannel.eventLoop().schedule(dropStream, 1L, TimeUnit.SECONDS);
@@ -226,7 +221,7 @@ public class SinglePoint
                 }
                 break;
             }
-            case OpenUDP:
+            case OPENUDP:
             {
                 if (event.clfLimitExceeded)
                 {
@@ -234,9 +229,7 @@ public class SinglePoint
                         linkChannel.close();
                     else
                     {
-                        linkChannel.writeAndFlush(new Message()
-                                .setType(MessageType.Drop)
-                                .setStreamId(event.streamId));
+                        linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(event.streamId));
                         session.pendingOpen.updateAndGet(decrementIfPositive);
                     }
 
@@ -257,9 +250,7 @@ public class SinglePoint
                     if (request == null || request.isDone() || !request.trySuccess(result))
                     {
                         Runnable dropStream = () -> {
-                            linkChannel.writeAndFlush(new Message()
-                                    .setType(MessageType.Drop)
-                                    .setStreamId(event.streamId));
+                            linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(event.streamId));
                             session.pendingOpen.updateAndGet(decrementIfPositive);
                         };
                         ScheduledFuture<?> scheduledDrop = linkChannel.eventLoop().schedule(dropStream, 1L, TimeUnit.SECONDS);
@@ -274,7 +265,7 @@ public class SinglePoint
                 }
                 break;
             }
-            case OpenFailed:
+            case OPENFAILED:
             {
                 if (event.clfLimitExceeded && session.ongoingStreams.isEmpty())
                 {
@@ -286,7 +277,7 @@ public class SinglePoint
                 }
                 break;
             }
-            case Ping:
+            case PING:
             {
                 if (event.clfLimitExceeded && session.ongoingStreams.isEmpty())
                 {
@@ -324,13 +315,9 @@ public class SinglePoint
                             channels.add(future.channel());
 
                             if (config.secret_3 != null && Shared.isSHA3Available())
-                                future.channel().writeAndFlush(new Message()
-                                        .setType(MessageType.AuthReq_3)
-                                        .setPayload(Unpooled.EMPTY_BUFFER));
+                                future.channel().writeAndFlush(MessageType.AUTHREQ3.create().setPayload(Unpooled.EMPTY_BUFFER));
                             else if (config.secret != null)
-                                future.channel().writeAndFlush(new Message()
-                                        .setType(MessageType.AuthReq)
-                                        .setPayload(Unpooled.EMPTY_BUFFER));
+                                future.channel().writeAndFlush(MessageType.AUTHREQ.create().setPayload(Unpooled.EMPTY_BUFFER));
                             else
                                 future.channel().close();
 
@@ -408,9 +395,7 @@ public class SinglePoint
         return new Runnable()
         {
 
-            private final Message msg = new Message()
-                    .setType(MessageType.Open)
-                    .setStreamId(config.targetAddress);
+            private final Message msg = MessageType.OPEN.create().setStreamId(config.targetAddress);
             private final ChannelFutureListener decrementPendingIfFailed = future -> {
                 if (!future.isSuccess())
                     future.channel().attr(Vars.SESSION_KEY).get().pendingOpen.updateAndGet(decrementIfPositive);
@@ -436,9 +421,7 @@ public class SinglePoint
         return new Runnable()
         {
 
-            private final Message msg = new Message()
-                    .setType(MessageType.OpenUDP)
-                    .setStreamId(config.targetAddress);
+            private final Message msg = MessageType.OPENUDP.create().setStreamId(config.targetAddress);
             private final ChannelFutureListener decrementPendingIfFailed = future -> {
                 if (!future.isSuccess())
                     future.channel().attr(Vars.SESSION_KEY).get().pendingOpen.updateAndGet(decrementIfPositive);
