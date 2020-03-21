@@ -298,7 +298,7 @@ public class SinglePoint
     private ChannelFuture initiateNewLink()
     {
         return new Bootstrap()
-                .group(Shared.NettyObjects.workerGroup)
+                .group(Vars.LINKS)
                 .channel(Shared.NettyObjects.classSocketChannel)
                 .handler(linkInitializer)
                 .option(ChannelOption.SO_KEEPALIVE, true)
@@ -363,7 +363,7 @@ public class SinglePoint
 
             private boolean shouldTry()
             {
-                return (links.size() + pendingLinks.get()) < config.numLinks && !Shared.NettyObjects.workerGroup.isShuttingDown();
+                return (links.size() + pendingLinks.get()) < config.numLinks && !Vars.BOSS.isShuttingDown();
             }
 
             private void tryConnect()
@@ -461,7 +461,7 @@ public class SinglePoint
     private ChannelFuture startTCPStreamService()
     {
         return new ServerBootstrap()
-                .group(Shared.NettyObjects.bossGroup, Shared.NettyObjects.workerGroup)
+                .group(Vars.BOSS, Vars.STREAMS)
                 .channel(Shared.NettyObjects.classServerSocketChannel)
                 .childHandler(tcpStreamInitializer)
                 .option(ChannelOption.SO_BACKLOG, 1024)
@@ -484,7 +484,7 @@ public class SinglePoint
     private ChannelFuture startUDPStreamService()
     {
         return new Bootstrap()
-                .group(Shared.NettyObjects.workerGroup)
+                .group(Vars.BOSS)
                 .channel(Shared.NettyObjects.classDatagramChannel)
                 .handler(udpStreamInitializer)
                 .option(ChannelOption.AUTO_CLOSE, false)

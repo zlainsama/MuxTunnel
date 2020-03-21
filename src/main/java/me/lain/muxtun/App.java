@@ -366,7 +366,7 @@ public class App
             SimpleLogger.println();
             SimpleLogger.println("%s > Building SSLContext...", Shared.printNow());
             for (SinglePointTempConfig config : configs.values())
-                config.sslCtx = SslContextBuilder.forClient().trustManager(new FingerprintTrustManagerFactory(config.trustSha1)).ciphers(!config.ciphers.isEmpty() ? config.ciphers : Shared.TLS.defaultCipherSuites, SupportedCipherSuiteFilter.INSTANCE).protocols(!config.protocols.isEmpty() ? config.protocols : Shared.TLS.defaultProtocols).build();
+                config.sslCtx = SslContextBuilder.forClient().trustManager(new FingerprintTrustManagerFactory(config.trustSha1)).ciphers(!config.ciphers.isEmpty() ? config.ciphers : !Shared.TLS.defaultCipherSuites.isEmpty() ? Shared.TLS.defaultCipherSuites : null, SupportedCipherSuiteFilter.INSTANCE).protocols(!config.protocols.isEmpty() ? config.protocols : !Shared.TLS.defaultProtocols.isEmpty() ? Shared.TLS.defaultProtocols : null).build();
             SimpleLogger.println("%s > Done.", Shared.printNow());
 
             SimpleLogger.println();
@@ -398,8 +398,7 @@ public class App
                 SimpleLogger.println();
                 SimpleLogger.println("%s > Shutting down...", Shared.printNow());
                 List<Future<?>> futures = new ArrayList<>();
-                futures.add(Shared.NettyObjects.bossGroup.shutdownGracefully());
-                futures.add(Shared.NettyObjects.workerGroup.shutdownGracefully());
+                futures.addAll(Shared.NettyObjects.shutdownGracefully());
                 futures.addAll(points.stream().map(SinglePoint::stop).collect(Collectors.toList()));
                 futures.forEach(Future::syncUninterruptibly);
                 SimpleLogger.println("%s > Done.", Shared.printNow());
