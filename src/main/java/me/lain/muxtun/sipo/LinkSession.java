@@ -4,9 +4,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
-import io.netty.channel.Channel;
 import me.lain.muxtun.Shared;
 
 class LinkSession
@@ -15,8 +15,9 @@ class LinkSession
     final UUID targetAddress;
     final Function<byte[], Optional<byte[]>> challengeGenerator;
     final Function<byte[], Optional<byte[]>> challengeGenerator_3;
-    final Map<UUID, Channel> ongoingStreams;
+    final Map<UUID, StreamContext> ongoingStreams;
     final LinkSessionAuthStatus authStatus;
+    final AtomicBoolean flowControl;
     final LinkSessionConnectionLatencyFactor clf;
     final AtomicInteger pendingOpen;
 
@@ -35,6 +36,7 @@ class LinkSession
         };
         ongoingStreams = new ConcurrentHashMap<>();
         authStatus = new LinkSessionAuthStatus();
+        flowControl = new AtomicBoolean();
         clf = new LinkSessionConnectionLatencyFactor(config.maxCLF);
         pendingOpen = new AtomicInteger();
     }

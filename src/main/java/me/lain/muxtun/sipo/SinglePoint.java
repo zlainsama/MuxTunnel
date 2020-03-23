@@ -151,6 +151,8 @@ public class SinglePoint
                 {
                     linkChannel.writeAndFlush(MessageType.SNAPPY.create());
                     linkChannel.pipeline().addBefore("FrameCodec", "SnappyCodec", new SnappyCodec());
+                    linkChannel.writeAndFlush(MessageType.FLOWCONTROL.create());
+                    session.flowControl.set(true);
 
                     links.add(linkChannel);
                     pendingLinks.updateAndGet(decrementIfPositive);

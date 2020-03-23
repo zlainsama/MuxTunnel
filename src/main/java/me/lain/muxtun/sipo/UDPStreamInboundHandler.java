@@ -22,6 +22,8 @@ import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.util.ReferenceCountUtil;
 import me.lain.muxtun.codec.Message.MessageType;
+import me.lain.muxtun.sipo.StreamContext.DefaultStreamContext;
+import me.lain.muxtun.sipo.StreamContext.FlowControlledStreamContext;
 
 @Sharable
 class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
@@ -93,6 +95,7 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
         {
             AtomicReference<Channel> boundLink = new AtomicReference<>();
             AtomicReference<UUID> boundId = new AtomicReference<>();
+            AtomicReference<StreamContext> boundSctx = new AtomicReference<>();
 
             PayloadWriter writerHead = payload -> {
                 try
@@ -116,7 +119,12 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
                     UUID streamId = boundId.get();
                     if (streamId == null)
                         return false;
+                    StreamContext sctx = boundSctx.get();
+                    if (sctx == null)
+                        return false;
+                    int size = payload.readableBytes();
                     link.writeAndFlush(MessageType.DATA.create().setStreamId(streamId).setPayload(payload.retain()));
+                    sctx.updateWindowSize(i -> i - size);
                     return true;
                 }
                 finally
@@ -305,7 +313,7 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
                 {
                     try
                     {
-                        if (!writerTail.writeSlices(((ByteBuf) msg).retain(), 1048576, null))
+                        if (!writerTail.writeSlices(((ByteBuf) msg).retain(), 65536, null))
                             ctx.close();
                     }
                     finally
@@ -413,9 +421,10 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
 
                     boundLink.set(result.linkChannel);
                     boundId.set(result.streamId);
-                    result.session.ongoingStreams.put(result.streamId, Tail);
+                    boundSctx.set(result.session.flowControl.get() ? new FlowControlledStreamContext(Tail) : new DefaultStreamContext(Tail));
+                    result.session.ongoingStreams.put(result.streamId, boundSctx.get());
                     Tail.closeFuture().addListener(closeFuture -> {
-                        if (result.linkChannel.isActive() && result.session.ongoingStreams.remove(result.streamId) == Tail)
+                        if (result.linkChannel.isActive() && result.session.ongoingStreams.remove(result.streamId) != null)
                             result.linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(result.streamId));
                     });
                     Tail.config().setAutoRead(true);

@@ -11,6 +11,8 @@ import io.netty.handler.flush.FlushConsolidationHandler;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import io.netty.util.ReferenceCountUtil;
 import me.lain.muxtun.codec.Message.MessageType;
+import me.lain.muxtun.sipo.StreamContext.DefaultStreamContext;
+import me.lain.muxtun.sipo.StreamContext.FlowControlledStreamContext;
 
 @Sharable
 class TCPStreamInitializer extends ChannelInitializer<SocketChannel>
@@ -41,13 +43,18 @@ class TCPStreamInitializer extends ChannelInitializer<SocketChannel>
             {
                 RelayRequestResult result = (RelayRequestResult) future.get();
 
-                result.session.ongoingStreams.put(result.streamId, ch);
+                result.session.ongoingStreams.put(result.streamId, result.session.flowControl.get() ? new FlowControlledStreamContext(ch) : new DefaultStreamContext(ch));
                 ch.attr(Vars.WRITER_KEY).set(payload -> {
                     try
                     {
                         if (!result.linkChannel.isActive())
                             return false;
+                        StreamContext sctx = result.session.ongoingStreams.get(result.streamId);
+                        if (sctx == null)
+                            return false;
+                        int size = payload.readableBytes();
                         result.linkChannel.writeAndFlush(MessageType.DATA.create().setStreamId(result.streamId).setPayload(payload.retain()));
+                        sctx.updateWindowSize(i -> i - size);
                         return true;
                     }
                     finally
@@ -56,7 +63,7 @@ class TCPStreamInitializer extends ChannelInitializer<SocketChannel>
                     }
                 });
                 ch.closeFuture().addListener(closeFuture -> {
-                    if (result.linkChannel.isActive() && result.session.ongoingStreams.remove(result.streamId) == ch)
+                    if (result.linkChannel.isActive() && result.session.ongoingStreams.remove(result.streamId) != null)
                         result.linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(result.streamId));
                 });
                 ch.config().setAutoRead(true);
