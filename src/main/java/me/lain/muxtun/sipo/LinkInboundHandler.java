@@ -96,16 +96,7 @@ class LinkInboundHandler extends ChannelInboundHandlerAdapter
                             {
                                 int size = payload.readableBytes();
                                 sctx.writeAndFlush(payload.retain());
-                                int threshold = sctx.getThreshold();
-                                int received = sctx.updateReceived(i -> i + size);
-                                if (received >= threshold)
-                                {
-                                    int increment = sctx.getNextIncrement();
-                                    ctx.writeAndFlush(MessageType.UPDATEWINDOW.create().setStreamId(streamId).setWindowSizeIncrement(increment < 1048576 ? Math.min(increment + threshold, 1048576) : increment));
-                                    sctx.updateReceived(i -> i - threshold);
-                                    sctx.updateThreshold(i -> i < increment ? Math.min(i * 2, increment) : i);
-                                    sctx.updateNextIncrement(i -> i < 1048576 ? Math.min(i * 2, 1048576) : i);
-                                }
+                                sctx.updateReceived(i -> i + size);
                             }
                             else
                             {

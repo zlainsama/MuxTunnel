@@ -1,10 +1,12 @@
 package me.lain.muxtun.sipo;
 
 import java.util.Optional;
+import me.lain.muxtun.util.SmoothedRoundTripTime;
 
 class LinkSessionConnectionLatencyFactor
 {
 
+    private final SmoothedRoundTripTime smoothed;
     private volatile Long startTime;
     private volatile Integer factor;
 
@@ -12,6 +14,7 @@ class LinkSessionConnectionLatencyFactor
 
     LinkSessionConnectionLatencyFactor(int maxCLF)
     {
+        this.smoothed = new SmoothedRoundTripTime();
         this.maxCLF = maxCLF;
     }
 
@@ -23,7 +26,7 @@ class LinkSessionConnectionLatencyFactor
             {
                 if (startTime != null)
                 {
-                    factor = (int) (Math.min(Math.max(0L, System.currentTimeMillis() - startTime), 1000L) / 125L);
+                    factor = (int) (Math.min(Math.max(0L, smoothed.updateAndGet(System.currentTimeMillis() - startTime)), 1000L) / 125L);
                     startTime = null;
                 }
             }

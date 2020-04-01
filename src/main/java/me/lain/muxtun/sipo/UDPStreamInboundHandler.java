@@ -22,8 +22,6 @@ import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.util.ReferenceCountUtil;
 import me.lain.muxtun.codec.Message.MessageType;
-import me.lain.muxtun.sipo.StreamContext.DefaultStreamContext;
-import me.lain.muxtun.sipo.StreamContext.FlowControlledStreamContext;
 
 @Sharable
 class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
@@ -421,7 +419,11 @@ class UDPStreamInboundHandler extends ChannelInboundHandlerAdapter
 
                     boundLink.set(result.linkChannel);
                     boundId.set(result.streamId);
-                    boundSctx.set(result.session.flowControl.get() ? new FlowControlledStreamContext(Tail) : new DefaultStreamContext(Tail));
+                    boundSctx.set(new StreamContext(result.streamId, Tail, result.session.flowControl.get() ? new FlowControl(hasSpace -> {
+                        Tail.config().setAutoRead(hasSpace && result.linkChannel.isWritable());
+                    }, increment -> {
+                        result.linkChannel.writeAndFlush(MessageType.UPDATEWINDOW.create().setStreamId(result.streamId).setWindowSizeIncrement(increment));
+                    }) : null));
                     result.session.ongoingStreams.put(result.streamId, boundSctx.get());
                     Tail.closeFuture().addListener(closeFuture -> {
                         if (result.linkChannel.isActive() && result.session.ongoingStreams.remove(result.streamId) != null)

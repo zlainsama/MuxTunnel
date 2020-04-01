@@ -11,8 +11,6 @@ import io.netty.handler.flush.FlushConsolidationHandler;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import io.netty.util.ReferenceCountUtil;
 import me.lain.muxtun.codec.Message.MessageType;
-import me.lain.muxtun.sipo.StreamContext.DefaultStreamContext;
-import me.lain.muxtun.sipo.StreamContext.FlowControlledStreamContext;
 
 @Sharable
 class TCPStreamInitializer extends ChannelInitializer<SocketChannel>
@@ -43,7 +41,11 @@ class TCPStreamInitializer extends ChannelInitializer<SocketChannel>
             {
                 RelayRequestResult result = (RelayRequestResult) future.get();
 
-                result.session.ongoingStreams.put(result.streamId, result.session.flowControl.get() ? new FlowControlledStreamContext(ch) : new DefaultStreamContext(ch));
+                result.session.ongoingStreams.put(result.streamId, new StreamContext(result.streamId, ch, result.session.flowControl.get() ? new FlowControl(hasSpace -> {
+                    ch.config().setAutoRead(hasSpace && result.linkChannel.isWritable());
+                }, increment -> {
+                    result.linkChannel.writeAndFlush(MessageType.UPDATEWINDOW.create().setStreamId(result.streamId).setWindowSizeIncrement(increment));
+                }) : null));
                 ch.attr(Vars.WRITER_KEY).set(payload -> {
                     try
                     {
