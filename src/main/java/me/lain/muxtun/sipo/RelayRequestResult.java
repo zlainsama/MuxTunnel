@@ -1,20 +1,27 @@
 package me.lain.muxtun.sipo;
 
 import java.util.UUID;
-import io.netty.channel.Channel;
 
 class RelayRequestResult
 {
 
-    final Channel linkChannel;
-    final LinkSession session;
-    final UUID streamId;
+    private final LinkSession session;
+    private final UUID streamId;
 
-    RelayRequestResult(Channel linkChannel, LinkSession session, UUID streamId)
+    RelayRequestResult(LinkSession session, UUID streamId)
     {
-        this.linkChannel = linkChannel;
         this.session = session;
         this.streamId = streamId;
+    }
+
+    LinkSession getSession()
+    {
+        return session;
+    }
+
+    UUID getStreamId()
+    {
+        return streamId;
     }
 
 }

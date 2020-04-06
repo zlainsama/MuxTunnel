@@ -1,311 +1,107 @@
 package me.lain.muxtun.sipo;
 
-import java.util.Comparator;
 import java.util.Optional;
-import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntUnaryOperator;
+import java.util.stream.IntStream;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
+import io.netty.channel.socket.DatagramChannel;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.flush.FlushConsolidationHandler;
+import io.netty.handler.stream.ChunkedWriteHandler;
+import io.netty.handler.timeout.IdleState;
+import io.netty.handler.timeout.IdleStateEvent;
+import io.netty.handler.timeout.IdleStateHandler;
+import io.netty.handler.timeout.WriteTimeoutHandler;
 import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.concurrent.Promise;
 import io.netty.util.concurrent.PromiseCombiner;
-import io.netty.util.concurrent.ScheduledFuture;
 import me.lain.muxtun.Shared;
-import me.lain.muxtun.codec.Message;
+import me.lain.muxtun.codec.FrameCodec;
 import me.lain.muxtun.codec.Message.MessageType;
+import me.lain.muxtun.codec.MessageCodec;
 import me.lain.muxtun.codec.SnappyCodec;
 import me.lain.muxtun.util.SimpleLogger;
 
 public class SinglePoint
 {
 
-    private static final Comparator<Channel> linkSorter = Comparator.comparingInt(link -> {
-        LinkSession session = link.attr(Vars.SESSION_KEY).get();
-        return session.ongoingStreams.size() * 16 + session.pendingOpen.get() * 4 + session.clf.getFactor().orElse(8);
-    });
     private static final IntUnaryOperator decrementIfPositive = i -> i > 0 ? i - 1 : i;
 
     private final SinglePointConfig config;
     private final ChannelGroup channels;
-    private final ChannelGroup links;
-    private final AtomicInteger pendingLinks;
-    private final LinkInitializer linkInitializer;
-    private final TCPStreamInitializer tcpStreamInitializer;
-    private final UDPStreamInitializer udpStreamInitializer;
-    private final Queue<RelayRequest> tcpRelayRequestQueue;
-    private final Queue<RelayRequest> udpRelayRequestQueue;
-    private final Queue<PendingOpenDrop> tcpPendingOpenDropQueue;
-    private final Queue<PendingOpenDrop> udpPendingOpenDropQueue;
-    private final Runnable taskMaintainLinks;
-    private final Runnable taskTryOpenTCP;
-    private final Runnable taskTryOpenUDP;
-    private final AtomicReference<Optional<ScheduledFuture<?>>> scheduledMaintainLinks;
+    private final LinkManager manager;
+    private final LinkHandler[] linkHandlers;
+    private final TCPStreamHandler tcpStreamHandler;
+    private final UDPStreamHandler udpStreamHandler;
+    private final AtomicReference<Future<?>> scheduledMaintainLinks;
 
     public SinglePoint(SinglePointConfig config)
     {
         this.config = config;
         this.channels = new DefaultChannelGroup("SinglePoint", GlobalEventExecutor.INSTANCE, true);
-        this.links = new DefaultChannelGroup("SinglePointLinks", GlobalEventExecutor.INSTANCE, true);
-        this.pendingLinks = new AtomicInteger();
-        this.linkInitializer = new LinkInitializer(config, new LinkEventHandler(this::handleLinkSessionEvent));
-        this.tcpStreamInitializer = new TCPStreamInitializer(channels, this::enqueueTCPStream);
-        this.udpStreamInitializer = new UDPStreamInitializer(new UDPStreamInboundHandler(channels, this::enqueueUDPStream));
-        this.tcpRelayRequestQueue = new ConcurrentLinkedQueue<>();
-        this.udpRelayRequestQueue = new ConcurrentLinkedQueue<>();
-        this.tcpPendingOpenDropQueue = new ConcurrentLinkedQueue<>();
-        this.udpPendingOpenDropQueue = new ConcurrentLinkedQueue<>();
-        this.taskMaintainLinks = newTaskMaintainLinks();
-        this.taskTryOpenTCP = newTaskTryOpenTCP();
-        this.taskTryOpenUDP = newTaskTryOpenUDP();
-        this.scheduledMaintainLinks = new AtomicReference<>(Optional.empty());
+        this.manager = new LinkManager(new SharedResources(future -> {
+            if (future.isSuccess())
+                channels.add(future.channel());
+        }, config.getTargetAddress(), config.getMaxCLF()));
+        this.linkHandlers = IntStream.range(0, config.getNumSessions()).mapToObj(i -> new LinkHandler()).toArray(LinkHandler[]::new);
+        this.tcpStreamHandler = TCPStreamHandler.DEFAULT;
+        this.udpStreamHandler = new UDPStreamHandler(manager);
+        this.scheduledMaintainLinks = new AtomicReference<>();
     }
 
-    private RelayRequest enqueueTCPStream(Channel tcpStream)
-    {
-        RelayRequest request = new RelayRequest(tcpStream.eventLoop());
-
-        PendingOpenDrop pendingOpenDrop;
-        while ((pendingOpenDrop = tcpPendingOpenDropQueue.poll()) != null)
-        {
-            if (!pendingOpenDrop.scheduledDrop.cancel(false))
-                continue;
-            if (request.trySuccess(pendingOpenDrop.result))
-                return request;
-            pendingOpenDrop.dropStream.run();
-        }
-
-        if (!tcpRelayRequestQueue.offer(request))
-            request.tryFailure(new IllegalStateException());
-        else if (!request.isDone())
-        {
-            taskTryOpenTCP.run();
-            ScheduledFuture<?> taskRequestMore = tcpStream.eventLoop().schedule(taskTryOpenTCP, 2L, TimeUnit.SECONDS);
-            ScheduledFuture<?> taskCancelRequest = tcpStream.eventLoop().schedule(() -> request.cancel(false), 60L, TimeUnit.SECONDS);
-            request.addListener(future -> {
-                taskRequestMore.cancel(false);
-                taskCancelRequest.cancel(false);
-            });
-        }
-        return request;
-    }
-
-    private RelayRequest enqueueUDPStream(Channel udpStream)
-    {
-        RelayRequest request = new RelayRequest(udpStream.eventLoop());
-
-        PendingOpenDrop pendingOpenDrop;
-        while ((pendingOpenDrop = udpPendingOpenDropQueue.poll()) != null)
-        {
-            if (!pendingOpenDrop.scheduledDrop.cancel(false))
-                continue;
-            if (request.trySuccess(pendingOpenDrop.result))
-                return request;
-            pendingOpenDrop.dropStream.run();
-        }
-
-        if (!udpRelayRequestQueue.offer(request))
-            request.tryFailure(new IllegalStateException());
-        else if (!request.isDone())
-        {
-            taskTryOpenUDP.run();
-            ScheduledFuture<?> taskRequestMore = udpStream.eventLoop().schedule(taskTryOpenUDP, 2L, TimeUnit.SECONDS);
-            ScheduledFuture<?> taskCancelRequest = udpStream.eventLoop().schedule(() -> request.cancel(false), 60L, TimeUnit.SECONDS);
-            request.addListener(future -> {
-                taskRequestMore.cancel(false);
-                taskCancelRequest.cancel(false);
-            });
-        }
-        return request;
-    }
-
-    public ChannelGroup getChannels()
-    {
-        return channels;
-    }
-
-    private void handleLinkSessionEvent(Channel linkChannel, LinkSession session, LinkSessionEvent event) throws Exception
-    {
-        switch (event.type)
-        {
-            case AUTH:
-            {
-                if (event.clfLimitExceeded)
-                {
-                    linkChannel.close();
-                    pendingLinks.updateAndGet(decrementIfPositive);
-                }
-                else
-                {
-                    linkChannel.writeAndFlush(MessageType.SNAPPY.create());
-                    linkChannel.pipeline().addBefore("FrameCodec", "SnappyCodec", new SnappyCodec());
-                    linkChannel.writeAndFlush(MessageType.FLOWCONTROL.create());
-                    session.flowControl.set(true);
-
-                    links.add(linkChannel);
-                    pendingLinks.updateAndGet(decrementIfPositive);
-
-                    SimpleLogger.println("%s > [%s] link %s up.",
-                            Shared.printNow(),
-                            config.name,
-                            String.format("%s%s", linkChannel.id(), session.clf.getFactor().map(f -> String.format("(CLF:%d)", f)).orElse("")));
-                    linkChannel.closeFuture().addListener(future -> {
-                        linkChannel.eventLoop().submit(() -> {
-                            SimpleLogger.println("%s > [%s] link %s down.%s%s",
-                                    Shared.printNow(),
-                                    config.name,
-                                    String.format("%s%s", linkChannel.id(), session.clf.getFactor().map(f -> String.format("(CLF:%d)", f)).orElse("")),
-                                    session.ongoingStreams.size() > 0 ? String.format(" (%d dropped)", session.ongoingStreams.size()) : "",
-                                    linkChannel.attr(Vars.ERROR_KEY).get() != null ? String.format(" (%s)", linkChannel.attr(Vars.ERROR_KEY).get().toString()) : "");
-                        });
-                    });
-
-                    if (!tcpRelayRequestQueue.isEmpty())
-                        linkChannel.eventLoop().submit(taskTryOpenTCP);
-                    if (!udpRelayRequestQueue.isEmpty())
-                        linkChannel.eventLoop().submit(taskTryOpenUDP);
-                }
-                break;
-            }
-            case OPEN:
-            {
-                if (event.clfLimitExceeded)
-                {
-                    if (session.ongoingStreams.isEmpty())
-                        linkChannel.close();
-                    else
-                    {
-                        linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(event.streamId));
-                        session.pendingOpen.updateAndGet(decrementIfPositive);
-                    }
-
-                    if (!tcpRelayRequestQueue.isEmpty())
-                        linkChannel.eventLoop().submit(taskTryOpenTCP);
-                }
-                else
-                {
-                    RelayRequest request;
-                    while ((request = tcpRelayRequestQueue.poll()) != null)
-                    {
-                        if (!request.setUncancellable())
-                            continue;
-                        break;
-                    }
-
-                    RelayRequestResult result = new RelayRequestResult(linkChannel, session, event.streamId);
-                    if (request == null || request.isDone() || !request.trySuccess(result))
-                    {
-                        Runnable dropStream = () -> {
-                            linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(event.streamId));
-                            session.pendingOpen.updateAndGet(decrementIfPositive);
-                        };
-                        ScheduledFuture<?> scheduledDrop = linkChannel.eventLoop().schedule(dropStream, 1L, TimeUnit.SECONDS);
-
-                        if (!tcpPendingOpenDropQueue.offer(new PendingOpenDrop(result, dropStream, scheduledDrop)) && scheduledDrop.cancel(false))
-                            dropStream.run();
-                    }
-                    else
-                    {
-                        session.pendingOpen.updateAndGet(decrementIfPositive);
-                    }
-                }
-                break;
-            }
-            case OPENUDP:
-            {
-                if (event.clfLimitExceeded)
-                {
-                    if (session.ongoingStreams.isEmpty())
-                        linkChannel.close();
-                    else
-                    {
-                        linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(event.streamId));
-                        session.pendingOpen.updateAndGet(decrementIfPositive);
-                    }
-
-                    if (!udpRelayRequestQueue.isEmpty())
-                        linkChannel.eventLoop().submit(taskTryOpenUDP);
-                }
-                else
-                {
-                    RelayRequest request;
-                    while ((request = udpRelayRequestQueue.poll()) != null)
-                    {
-                        if (!request.setUncancellable())
-                            continue;
-                        break;
-                    }
-
-                    RelayRequestResult result = new RelayRequestResult(linkChannel, session, event.streamId);
-                    if (request == null || request.isDone() || !request.trySuccess(result))
-                    {
-                        Runnable dropStream = () -> {
-                            linkChannel.writeAndFlush(MessageType.DROP.create().setStreamId(event.streamId));
-                            session.pendingOpen.updateAndGet(decrementIfPositive);
-                        };
-                        ScheduledFuture<?> scheduledDrop = linkChannel.eventLoop().schedule(dropStream, 1L, TimeUnit.SECONDS);
-
-                        if (!udpPendingOpenDropQueue.offer(new PendingOpenDrop(result, dropStream, scheduledDrop)) && scheduledDrop.cancel(false))
-                            dropStream.run();
-                    }
-                    else
-                    {
-                        session.pendingOpen.updateAndGet(decrementIfPositive);
-                    }
-                }
-                break;
-            }
-            case OPENFAILED:
-            {
-                if (event.clfLimitExceeded && session.ongoingStreams.isEmpty())
-                {
-                    linkChannel.close();
-                }
-                else
-                {
-                    session.pendingOpen.updateAndGet(decrementIfPositive);
-                }
-                break;
-            }
-            case PING:
-            {
-                if (event.clfLimitExceeded && session.ongoingStreams.isEmpty())
-                {
-                    linkChannel.close();
-                }
-                else
-                {
-                    if (!tcpRelayRequestQueue.isEmpty())
-                        linkChannel.eventLoop().submit(taskTryOpenTCP);
-                    if (!udpRelayRequestQueue.isEmpty())
-                        linkChannel.eventLoop().submit(taskTryOpenUDP);
-                }
-                break;
-            }
-        }
-    }
-
-    private ChannelFuture initiateNewLink()
+    private ChannelFuture initiateNewLink(LinkHandler linkHandler)
     {
         return new Bootstrap()
                 .group(Vars.LINKS)
                 .channel(Shared.NettyObjects.classSocketChannel)
-                .handler(linkInitializer)
+                .handler(new ChannelInitializer<SocketChannel>()
+                {
+
+                    @Override
+                    protected void initChannel(SocketChannel ch) throws Exception
+                    {
+                        ch.attr(Vars.LINKCONTEXT_KEY).set(new LinkContext(manager, ch));
+
+                        ch.pipeline().addLast(new IdleStateHandler(0, 0, 60)
+                        {
+
+                            @Override
+                            protected void channelIdle(ChannelHandlerContext ctx, IdleStateEvent evt) throws Exception
+                            {
+                                if (evt.state() == IdleState.ALL_IDLE)
+                                    ctx.channel().writeAndFlush(MessageType.PING.create());
+                            }
+
+                        });
+                        ch.pipeline().addLast(new WriteTimeoutHandler(30));
+                        ch.pipeline().addLast(new ChunkedWriteHandler());
+                        ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
+                        ch.pipeline().addLast(config.getProxySupplier().get());
+                        ch.pipeline().addLast(config.getSslCtx().newHandler(ch.alloc()));
+                        ch.pipeline().addLast(new SnappyCodec());
+                        ch.pipeline().addLast(new FrameCodec());
+                        ch.pipeline().addLast(MessageCodec.DEFAULT);
+                        ch.pipeline().addLast(linkHandler);
+                    }
+
+                })
                 .option(ChannelOption.SO_KEEPALIVE, true)
                 .option(ChannelOption.TCP_NODELAY, true)
-                .connect(config.remoteAddress)
+                .connect(config.getRemoteAddress())
+                .addListener(manager.getResources().getChannelAccumulator())
                 .addListener(new ChannelFutureListener()
                 {
 
@@ -314,134 +110,12 @@ public class SinglePoint
                     {
                         if (future.isSuccess())
                         {
-                            channels.add(future.channel());
-
-                            if (config.secret_3 != null && Shared.isSHA3Available())
-                                future.channel().writeAndFlush(MessageType.AUTHREQ3.create().setPayload(Unpooled.EMPTY_BUFFER));
-                            else if (config.secret != null)
-                                future.channel().writeAndFlush(MessageType.AUTHREQ.create().setPayload(Unpooled.EMPTY_BUFFER));
-                            else
-                                future.channel().close();
-
-                            future.channel().closeFuture().addListener(new ChannelFutureListener()
-                            {
-
-                                @Override
-                                public void operationComplete(ChannelFuture future) throws Exception
-                                {
-                                    if (!future.channel().attr(Vars.SESSION_KEY).get().authStatus.completed)
-                                        pendingLinks.updateAndGet(decrementIfPositive);
-                                }
-
-                            });
+                            RandomSession s = linkHandler.getRandomSession(false);
+                            future.channel().writeAndFlush(MessageType.JOINSESSION.create().setId(s.getSessionId()).setBuf(Unpooled.wrappedBuffer(s.getChallenge())));
                         }
                     }
 
                 });
-    }
-
-    private Runnable newTaskMaintainLinks()
-    {
-        return new Runnable()
-        {
-
-            private final ChannelFutureListener decrementPendingIfFailed = future -> {
-                if (!future.isSuccess())
-                    pendingLinks.updateAndGet(decrementIfPositive);
-            };
-
-            @Override
-            public void run()
-            {
-                try
-                {
-                    if (shouldTry())
-                        tryConnect();
-                }
-                catch (Throwable ignored)
-                {
-                }
-            }
-
-            private boolean shouldTry()
-            {
-                return (links.size() + pendingLinks.get()) < config.numLinks && !Vars.BOSS.isShuttingDown();
-            }
-
-            private void tryConnect()
-            {
-                if (tryIncrementPending())
-                    initiateNewLink().addListener(decrementPendingIfFailed);
-            }
-
-            private boolean tryIncrementPending()
-            {
-                while (true)
-                {
-                    final int limit = config.numLinks - links.size();
-                    final int pending = pendingLinks.get();
-
-                    if (pending >= limit)
-                        return false;
-
-                    if (pendingLinks.compareAndSet(pending, pending + 1))
-                        return true;
-                }
-            }
-
-        };
-    }
-
-    private Runnable newTaskTryOpenTCP()
-    {
-        return new Runnable()
-        {
-
-            private final Message msg = MessageType.OPEN.create().setStreamId(config.targetAddress);
-            private final ChannelFutureListener decrementPendingIfFailed = future -> {
-                if (!future.isSuccess())
-                    future.channel().attr(Vars.SESSION_KEY).get().pendingOpen.updateAndGet(decrementIfPositive);
-            };
-
-            @Override
-            public void run()
-            {
-                if (!links.isEmpty() && !tcpRelayRequestQueue.isEmpty())
-                {
-                    links.stream().sorted(linkSorter).limit(config.limitOpen).forEach(link -> {
-                        link.attr(Vars.SESSION_KEY).get().pendingOpen.incrementAndGet();
-                        link.writeAndFlush(msg).addListener(decrementPendingIfFailed);
-                    });
-                }
-            }
-
-        };
-    }
-
-    private Runnable newTaskTryOpenUDP()
-    {
-        return new Runnable()
-        {
-
-            private final Message msg = MessageType.OPENUDP.create().setStreamId(config.targetAddress);
-            private final ChannelFutureListener decrementPendingIfFailed = future -> {
-                if (!future.isSuccess())
-                    future.channel().attr(Vars.SESSION_KEY).get().pendingOpen.updateAndGet(decrementIfPositive);
-            };
-
-            @Override
-            public void run()
-            {
-                if (!links.isEmpty() && !udpRelayRequestQueue.isEmpty())
-                {
-                    links.stream().sorted(linkSorter).limit(config.limitOpen).forEach(link -> {
-                        link.attr(Vars.SESSION_KEY).get().pendingOpen.incrementAndGet();
-                        link.writeAndFlush(msg).addListener(decrementPendingIfFailed);
-                    });
-                }
-            }
-
-        };
     }
 
     public Future<Void> start()
@@ -454,7 +128,44 @@ public class SinglePoint
         });
         return result.addListener(future -> {
             if (future.isSuccess())
-                scheduledMaintainLinks.getAndSet(Optional.of(GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(taskMaintainLinks, 1L, 1L, TimeUnit.SECONDS))).ifPresent(scheduled -> scheduled.cancel(false));
+                Optional.ofNullable(scheduledMaintainLinks.getAndSet(GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(() -> {
+                    for (LinkHandler linkHandler : linkHandlers)
+                    {
+                        linkHandler.getLinksCount().updateAndGet(i -> {
+                            if (i < config.getNumLinksPerSession())
+                            {
+                                i += 1;
+
+                                initiateNewLink(linkHandler).addListener(new ChannelFutureListener()
+                                {
+
+                                    @Override
+                                    public void operationComplete(ChannelFuture future) throws Exception
+                                    {
+                                        if (future.isSuccess())
+                                        {
+                                            future.channel().closeFuture().addListener(closeFuture -> {
+                                                linkHandler.getLinksCount().updateAndGet(decrementIfPositive);
+
+                                                future.channel().eventLoop().execute(() -> {
+                                                    Throwable error = Vars.ChannelError.get(future.channel());
+                                                    if (error != null)
+                                                        SimpleLogger.println("%s > [%s] link %s closed with unexpected error. (%s)", Shared.printNow(), config.getName(), future.channel().id(), error);
+                                                });
+                                            });
+                                        }
+                                        else
+                                        {
+                                            linkHandler.getLinksCount().updateAndGet(decrementIfPositive);
+                                        }
+                                    }
+
+                                });
+                            }
+                            return i;
+                        });
+                    }
+                }, 1L, 1L, TimeUnit.SECONDS))).ifPresent(scheduled -> scheduled.cancel(false));
             else
                 stop();
         });
@@ -465,22 +176,50 @@ public class SinglePoint
         return new ServerBootstrap()
                 .group(Vars.BOSS, Vars.STREAMS)
                 .channel(Shared.NettyObjects.classServerSocketChannel)
-                .childHandler(tcpStreamInitializer)
-                .option(ChannelOption.SO_BACKLOG, 1024)
-                .childOption(ChannelOption.SO_KEEPALIVE, true)
-                .childOption(ChannelOption.TCP_NODELAY, true)
-                .bind(config.bindAddress)
-                .addListener(new ChannelFutureListener()
+                .childHandler(new ChannelInitializer<SocketChannel>()
                 {
 
                     @Override
-                    public void operationComplete(ChannelFuture future) throws Exception
+                    protected void initChannel(SocketChannel ch) throws Exception
                     {
-                        if (future.isSuccess())
-                            channels.add(future.channel());
+                        ch.newSucceededFuture().addListener(manager.getResources().getChannelAccumulator());
+
+                        RelayRequest request = manager.newTCPRelayRequest(ch.eventLoop());
+                        if (!request.addListener(future -> {
+                            if (future.isSuccess())
+                            {
+                                RelayRequestResult result = (RelayRequestResult) future.get();
+                                StreamContext context = result.getSession().getStreams().compute(result.getStreamId(), (key, value) -> {
+                                    if (value != null)
+                                        throw new Error("BadServer");
+                                    return new StreamContext(key, result.getSession(), ch);
+                                });
+                                ch.attr(Vars.STREAMCONTEXT_KEY).set(context);
+                                ch.closeFuture().addListener(closeFuture -> {
+                                    if (context.getSession().getStreams().remove(context.getStreamId(), context))
+                                        context.getSession().writeAndFlush(MessageType.CLOSESTREAM.create().setId(context.getStreamId()));
+                                });
+                                ch.config().setAutoRead(true);
+                            }
+                        }).isDone())
+                        {
+                            ChannelFutureListener taskCancelRequest = future -> request.cancel(false);
+                            ch.closeFuture().addListener(taskCancelRequest);
+                            request.addListener(future -> ch.closeFuture().removeListener(taskCancelRequest));
+                        }
+
+                        ch.pipeline().addLast(new ChunkedWriteHandler());
+                        ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
+                        ch.pipeline().addLast(tcpStreamHandler);
                     }
 
-                });
+                })
+                .option(ChannelOption.SO_BACKLOG, 1024)
+                .childOption(ChannelOption.SO_KEEPALIVE, true)
+                .childOption(ChannelOption.TCP_NODELAY, true)
+                .childOption(ChannelOption.AUTO_READ, false)
+                .bind(config.getBindAddress())
+                .addListener(manager.getResources().getChannelAccumulator());
     }
 
     private ChannelFuture startUDPStreamService()
@@ -488,31 +227,32 @@ public class SinglePoint
         return new Bootstrap()
                 .group(Vars.BOSS)
                 .channel(Shared.NettyObjects.classDatagramChannel)
-                .handler(udpStreamInitializer)
-                .option(ChannelOption.AUTO_CLOSE, false)
-                .bind(config.bindAddress)
-                .addListener(new ChannelFutureListener()
+                .handler(new ChannelInitializer<DatagramChannel>()
                 {
 
                     @Override
-                    public void operationComplete(ChannelFuture future) throws Exception
+                    protected void initChannel(DatagramChannel ch) throws Exception
                     {
-                        if (future.isSuccess())
-                            channels.add(future.channel());
+                        ch.pipeline().addLast(new ChunkedWriteHandler());
+                        ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
+                        ch.pipeline().addLast(udpStreamHandler);
                     }
 
-                });
+                })
+                .option(ChannelOption.AUTO_CLOSE, false)
+                .bind(config.getBindAddress())
+                .addListener(manager.getResources().getChannelAccumulator());
     }
 
     public Future<Void> stop()
     {
-        return channels.close().addListener(future -> scheduledMaintainLinks.getAndSet(Optional.empty()).ifPresent(scheduled -> scheduled.cancel(false)));
+        return channels.close().addListener(future -> Optional.ofNullable(scheduledMaintainLinks.getAndSet(null)).ifPresent(scheduled -> scheduled.cancel(false)));
     }
 
     @Override
     public String toString()
     {
-        return config.name;
+        return config.getName();
     }
 
 }

@@ -1,69 +1,64 @@
 package me.lain.muxtun.sipo;
 
+import java.io.IOException;
 import java.net.SocketAddress;
-import java.util.Optional;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import javax.net.ssl.SSLException;
 import io.netty.handler.proxy.ProxyHandler;
+import io.netty.handler.ssl.ClientAuth;
 import io.netty.handler.ssl.SslContext;
-import io.netty.handler.traffic.GlobalTrafficShapingHandler;
-import io.netty.util.concurrent.GlobalEventExecutor;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.SupportedCipherSuiteFilter;
+import io.netty.handler.ssl.util.FingerprintTrustManagerFactory;
+import me.lain.muxtun.Shared;
 
 public class SinglePointConfig
 {
 
-    private static final AtomicReference<Optional<GlobalTrafficShapingHandler>> globalTrafficShapingHandler = new AtomicReference<>(Optional.empty());
-
-    public static final int DEFAULT_NUMLINKS = 4;
-    public static final int DEFAULT_LIMITOPEN = 3;
+    public static final int DEFAULT_NUMLINKSPERSESSION = 4;
+    public static final int DEFAULT_NUMSESSIONS = 1;
     public static final int DEFAULT_MAXCLF = 8;
 
-    public static Optional<GlobalTrafficShapingHandler> getGlobalTrafficShapingHandler()
+    public static SslContext buildContext(Path pathCert, Path pathKey, List<String> trustSha1, List<String> ciphers, List<String> protocols) throws SSLException, IOException
     {
-        return globalTrafficShapingHandler.get();
+        return SslContextBuilder.forClient().keyManager(Files.newInputStream(pathCert, StandardOpenOption.READ), Files.newInputStream(pathKey, StandardOpenOption.READ))
+                .clientAuth(ClientAuth.REQUIRE)
+                .trustManager(new FingerprintTrustManagerFactory(trustSha1))
+                .ciphers(!ciphers.isEmpty() ? ciphers : !Shared.TLS.defaultCipherSuites.isEmpty() ? Shared.TLS.defaultCipherSuites : null, SupportedCipherSuiteFilter.INSTANCE)
+                .protocols(!protocols.isEmpty() ? protocols : !Shared.TLS.defaultProtocols.isEmpty() ? Shared.TLS.defaultProtocols : null)
+                .build();
     }
 
-    public static Optional<GlobalTrafficShapingHandler> setGlobalWriteReadLimit(long writeLimit, long readLimit)
-    {
-        if (writeLimit < 0L || readLimit < 0L)
-            throw new IllegalArgumentException();
+    private final SocketAddress bindAddress;
+    private final SocketAddress remoteAddress;
+    private final Supplier<ProxyHandler> proxySupplier;
+    private final SslContext sslCtx;
+    private final UUID targetAddress;
+    private final int numLinksPerSession;
+    private final int numSessions;
+    private final int maxCLF;
+    private final String name;
 
-        if (writeLimit == 0L && readLimit == 0L)
-            return globalTrafficShapingHandler.getAndSet(Optional.empty());
-        else
-            return globalTrafficShapingHandler.getAndSet(Optional.of(new GlobalTrafficShapingHandler(GlobalEventExecutor.INSTANCE, writeLimit, readLimit)));
+    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, Supplier<ProxyHandler> proxySupplier, SslContext sslCtx, UUID targetAddress)
+    {
+        this(bindAddress, remoteAddress, proxySupplier, sslCtx, targetAddress, DEFAULT_NUMLINKSPERSESSION, DEFAULT_NUMSESSIONS, DEFAULT_MAXCLF);
     }
 
-    final SocketAddress bindAddress;
-    final SocketAddress remoteAddress;
-    final Supplier<ProxyHandler> proxySupplier;
-    final SslContext sslCtx;
-    final UUID targetAddress;
-    final byte[] secret;
-    final byte[] secret_3;
-    final int numLinks;
-    final int limitOpen;
-    final int maxCLF;
-    final long writeLimit;
-    final long readLimit;
-    final String name;
-
-    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, Supplier<ProxyHandler> proxySupplier, SslContext sslCtx, UUID targetAddress, byte[] secret, byte[] secret_3)
+    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, Supplier<ProxyHandler> proxySupplier, SslContext sslCtx, UUID targetAddress, int numLinksPerSession, int numSessions, int maxCLF)
     {
-        this(bindAddress, remoteAddress, proxySupplier, sslCtx, targetAddress, secret, secret_3, DEFAULT_NUMLINKS, DEFAULT_LIMITOPEN, DEFAULT_MAXCLF, 0L, 0L);
+        this(bindAddress, remoteAddress, proxySupplier, sslCtx, targetAddress, numLinksPerSession, numSessions, maxCLF, "SinglePoint");
     }
 
-    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, Supplier<ProxyHandler> proxySupplier, SslContext sslCtx, UUID targetAddress, byte[] secret, byte[] secret_3, int numLinks, int limitOpen, int maxCLF, long writeLimit, long readLimit)
+    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, Supplier<ProxyHandler> proxySupplier, SslContext sslCtx, UUID targetAddress, int numLinksPerSession, int numSessions, int maxCLF, String name)
     {
-        this(bindAddress, remoteAddress, proxySupplier, sslCtx, targetAddress, secret, secret_3, numLinks, limitOpen, maxCLF, writeLimit, readLimit, "SinglePoint");
-    }
-
-    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, Supplier<ProxyHandler> proxySupplier, SslContext sslCtx, UUID targetAddress, byte[] secret, byte[] secret_3, int numLinks, int limitOpen, int maxCLF, long writeLimit, long readLimit, String name)
-    {
-        if (bindAddress == null || remoteAddress == null || proxySupplier == null || sslCtx == null || targetAddress == null || (secret == null && secret_3 == null) || name == null)
+        if (bindAddress == null || remoteAddress == null || proxySupplier == null || sslCtx == null || targetAddress == null || name == null)
             throw new NullPointerException();
-        if (!sslCtx.isClient() || (secret != null && secret.length == 0) || (secret_3 != null && secret_3.length == 0) || numLinks < 1 || limitOpen < 1 || maxCLF < 0 || writeLimit < 0L || readLimit < 0L || name.isEmpty())
+        if (!sslCtx.isClient() || numLinksPerSession < 1 || numSessions < 1 || maxCLF < 0 || name.isEmpty())
             throw new IllegalArgumentException();
 
         this.bindAddress = bindAddress;
@@ -71,14 +66,55 @@ public class SinglePointConfig
         this.proxySupplier = proxySupplier;
         this.sslCtx = sslCtx;
         this.targetAddress = targetAddress;
-        this.secret = secret;
-        this.secret_3 = secret_3;
-        this.numLinks = numLinks;
-        this.limitOpen = limitOpen;
+        this.numLinksPerSession = numLinksPerSession;
+        this.numSessions = numSessions;
         this.maxCLF = maxCLF;
-        this.writeLimit = writeLimit;
-        this.readLimit = readLimit;
         this.name = name;
+    }
+
+    public SocketAddress getBindAddress()
+    {
+        return bindAddress;
+    }
+
+    public int getMaxCLF()
+    {
+        return maxCLF;
+    }
+
+    public String getName()
+    {
+        return name;
+    }
+
+    public int getNumLinksPerSession()
+    {
+        return numLinksPerSession;
+    }
+
+    public int getNumSessions()
+    {
+        return numSessions;
+    }
+
+    public Supplier<ProxyHandler> getProxySupplier()
+    {
+        return proxySupplier;
+    }
+
+    public SocketAddress getRemoteAddress()
+    {
+        return remoteAddress;
+    }
+
+    public SslContext getSslCtx()
+    {
+        return sslCtx;
+    }
+
+    public UUID getTargetAddress()
+    {
+        return targetAddress;
     }
 
 }
