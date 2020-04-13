@@ -32,7 +32,6 @@ import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.FrameCodec;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.codec.MessageCodec;
-import me.lain.muxtun.codec.SnappyCodec;
 import me.lain.muxtun.util.SimpleLogger;
 
 public class SinglePoint
@@ -91,7 +90,6 @@ public class SinglePoint
                         ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
                         ch.pipeline().addLast(config.getProxySupplier().get());
                         ch.pipeline().addLast(config.getSslCtx().newHandler(ch.alloc()));
-                        ch.pipeline().addLast(new SnappyCodec());
                         ch.pipeline().addLast(new FrameCodec());
                         ch.pipeline().addLast(MessageCodec.DEFAULT);
                         ch.pipeline().addLast(linkHandler);

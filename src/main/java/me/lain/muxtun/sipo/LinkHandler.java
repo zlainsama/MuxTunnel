@@ -219,14 +219,11 @@ class LinkHandler extends ChannelDuplexHandler
                     if (lctx.getSession() != null)
                     {
                         lctx.getRTTM().complete().ifPresent(lctx.getSRTT()::updateAndGet);
+                        lctx.scheduledMeasurementTimeoutUpdater(false);
                         LinkSession session = lctx.getSession();
                         int ack = msg.getAck();
 
                         session.acknowledge(ack);
-
-                        int clf = (int) (Math.min(Math.max(0L, lctx.getSRTT().get()), 1000L) / 125L);
-                        if (clf > lctx.getManager().getResources().getMaxCLF())
-                            lctx.close();
                     }
                     else
                     {
@@ -253,7 +250,10 @@ class LinkHandler extends ChannelDuplexHandler
             case DATASTREAM:
                 promise.addListener(future -> {
                     if (future.isSuccess())
-                        lctx.getRTTM().initiate();
+                    {
+                        if (lctx.getRTTM().initiate())
+                            lctx.scheduledMeasurementTimeoutUpdater(true);
+                    }
                 });
                 break;
             default:
