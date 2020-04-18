@@ -155,7 +155,7 @@ class LinkHandler extends ChannelDuplexHandler
 
                         if (session.getFlowControl().inRange(seq))
                             session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(session.updateReceived()));
+                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack)));
                     }
                     else
                     {
@@ -172,7 +172,7 @@ class LinkHandler extends ChannelDuplexHandler
 
                         if (session.getFlowControl().inRange(seq))
                             session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(session.updateReceived()));
+                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack)));
                     }
                     else
                     {
@@ -189,7 +189,7 @@ class LinkHandler extends ChannelDuplexHandler
 
                         if (session.getFlowControl().inRange(seq))
                             session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(session.updateReceived()));
+                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack)));
                     }
                     else
                     {
@@ -206,7 +206,7 @@ class LinkHandler extends ChannelDuplexHandler
 
                         if (session.getFlowControl().inRange(seq))
                             session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(session.updateReceived()));
+                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack)));
                     }
                     else
                     {
