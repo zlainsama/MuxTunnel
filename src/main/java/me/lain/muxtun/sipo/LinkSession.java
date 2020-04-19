@@ -40,6 +40,7 @@ class LinkSession
     private final ChannelFutureListener remover;
     private final AtomicReference<Timeout> scheduledSelfClose;
     private final Map<UUID, StreamContext> streams;
+    private final Set<UUID> closedStreams;
 
     LinkSession(UUID sessionId, LinkManager manager, EventExecutor executor, byte[] challenge)
     {
@@ -56,6 +57,7 @@ class LinkSession
         this.remover = future -> drop(future.channel());
         this.scheduledSelfClose = new AtomicReference<>();
         this.streams = new ConcurrentHashMap<>();
+        this.closedStreams = Collections.newSetFromMap(new ConcurrentHashMap<UUID, Boolean>());
     }
 
     void acknowledge(int ack)
@@ -104,6 +106,14 @@ class LinkSession
 
     void close()
     {
+        if (getExecutor().inEventLoop())
+            close0();
+        else
+            getExecutor().submit(() -> close0());
+    }
+
+    private void close0()
+    {
         if (closed.compareAndSet(false, true))
         {
             manager.getSessions().remove(sessionId, this);
@@ -116,6 +126,7 @@ class LinkSession
             {
                 streams.values().removeAll(streams.values().stream().peek(StreamContext::close).collect(Collectors.toList()));
             }
+            closedStreams.clear();
             while (!inboundBuffer.isEmpty())
             {
                 inboundBuffer.values().removeAll(inboundBuffer.values().stream().peek(ReferenceCountUtil::release).collect(Collectors.toList()));
@@ -185,19 +196,7 @@ class LinkSession
                         {
                             try
                             {
-                                switch (msg.type())
-                                {
-                                    case OPENSTREAM:
-                                        return Optional.of(MessageType.OPENSTREAM.create().setSeq(msg.getSeq()).setId(msg.getId()));
-                                    case OPENSTREAMUDP:
-                                        return Optional.of(MessageType.OPENSTREAMUDP.create().setSeq(msg.getSeq()).setId(msg.getId()));
-                                    case CLOSESTREAM:
-                                        return Optional.of(MessageType.CLOSESTREAM.create().setSeq(msg.getSeq()).setId(msg.getId()));
-                                    case DATASTREAM:
-                                        return Optional.of(MessageType.DATASTREAM.create().setSeq(msg.getSeq()).setId(msg.getId()).setBuf(msg.getBuf().retainedDuplicate()));
-                                    default:
-                                        return Optional.empty();
-                                }
+                                return Optional.of(msg.copy());
                             }
                             catch (Throwable e)
                             {
@@ -250,6 +249,11 @@ class LinkSession
         return challenge;
     }
 
+    Set<UUID> getClosedStreams()
+    {
+        return closedStreams;
+    }
+
     EventExecutor getExecutor()
     {
         return executor;
@@ -295,7 +299,15 @@ class LinkSession
         return streams;
     }
 
-    void handleMessage(Message msg) throws Exception
+    void handleMessage(Message msg)
+    {
+        if (getExecutor().inEventLoop())
+            handleMessage0(msg);
+        else
+            getExecutor().submit(() -> handleMessage0(msg));
+    }
+
+    private void handleMessage0(Message msg)
     {
         switch (msg.type())
         {
@@ -305,18 +317,26 @@ class LinkSession
 
                 if (streamId != null)
                 {
-                    RelayRequest request;
-                    while ((request = getManager().getTCPRelayRequests().poll()) != null)
+                    if (getClosedStreams().contains(streamId))
                     {
-                        if (!request.setUncancellable())
-                            continue;
-                        break;
+                        writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId), true);
+                        writeAndFlush(MessageType.OPENSTREAM.create().setId(getManager().getResources().getTargetAddress()));
                     }
-
-                    RelayRequestResult result = new RelayRequestResult(this, streamId);
-                    if (request == null || request.isDone() || !request.trySuccess(result))
+                    else
                     {
-                        writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId));
+                        RelayRequest request;
+                        while ((request = getManager().getTCPRelayRequests().poll()) != null)
+                        {
+                            if (!request.setUncancellable())
+                                continue;
+                            break;
+                        }
+
+                        RelayRequestResult result = new RelayRequestResult(this, streamId);
+                        if (request == null || request.isDone() || !request.trySuccess(result))
+                        {
+                            writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId));
+                        }
                     }
                 }
                 else if (!getManager().getTCPRelayRequests().isEmpty())
@@ -331,23 +351,31 @@ class LinkSession
 
                 if (streamId != null)
                 {
-                    RelayRequest request;
-                    while ((request = getManager().getUDPRelayRequests().poll()) != null)
+                    if (getClosedStreams().contains(streamId))
                     {
-                        if (!request.setUncancellable())
-                            continue;
-                        break;
+                        writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId), true);
+                        writeAndFlush(MessageType.OPENSTREAMUDP.create().setId(getManager().getResources().getTargetAddress()));
                     }
-
-                    RelayRequestResult result = new RelayRequestResult(this, streamId);
-                    if (request == null || request.isDone() || !request.trySuccess(result))
+                    else
                     {
-                        writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId));
+                        RelayRequest request;
+                        while ((request = getManager().getUDPRelayRequests().poll()) != null)
+                        {
+                            if (!request.setUncancellable())
+                                continue;
+                            break;
+                        }
+
+                        RelayRequestResult result = new RelayRequestResult(this, streamId);
+                        if (request == null || request.isDone() || !request.trySuccess(result))
+                        {
+                            writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId));
+                        }
                     }
                 }
                 else if (!getManager().getUDPRelayRequests().isEmpty())
                 {
-                    writeAndFlush(MessageType.OPENSTREAM.create().setId(getManager().getResources().getTargetAddress()));
+                    writeAndFlush(MessageType.OPENSTREAMUDP.create().setId(getManager().getResources().getTargetAddress()));
                 }
                 break;
             }
@@ -355,10 +383,23 @@ class LinkSession
             {
                 UUID streamId = msg.getId();
 
-                StreamContext context = getStreams().remove(streamId);
-                if (context != null)
+                if (getClosedStreams().add(streamId))
                 {
-                    context.close();
+                    Vars.TIMER.newTimeout(handle -> getClosedStreams().remove(streamId), 30L, TimeUnit.SECONDS);
+                    StreamContext context = getStreams().remove(streamId);
+                    if (context != null)
+                    {
+                        context.close();
+                    }
+
+                    getPendingMessages().removeIf(pending -> {
+                        Message tmp = pending.apply(0);
+                        return MessageType.DATASTREAM == tmp.type() && streamId.equals(tmp.getId());
+                    });
+                    getOutboundBuffer().values().stream()
+                            .filter(sending -> MessageType.DATASTREAM == sending.type() && streamId.equals(sending.getId()))
+                            .map(Message::getBuf)
+                            .forEach(buf -> buf.skipBytes(buf.readableBytes()));
                 }
                 break;
             }
@@ -367,14 +408,17 @@ class LinkSession
                 UUID streamId = msg.getId();
                 ByteBuf payload = msg.getBuf();
 
-                StreamContext context = getStreams().get(streamId);
-                if (context != null)
+                if (!getClosedStreams().contains(streamId))
                 {
-                    context.writeAndFlush(payload.retain());
-                }
-                else
-                {
-                    writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId));
+                    StreamContext context = getStreams().get(streamId);
+                    if (context != null)
+                    {
+                        context.writeAndFlush(payload.retain());
+                    }
+                    else
+                    {
+                        writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId));
+                    }
                 }
                 break;
             }
@@ -466,6 +510,11 @@ class LinkSession
 
     boolean write(Message msg)
     {
+        return write(msg, false);
+    }
+
+    boolean write(Message msg, boolean force)
+    {
         try
         {
             if (!isActive())
@@ -474,17 +523,58 @@ class LinkSession
             switch (msg.type())
             {
                 case OPENSTREAM:
-                case OPENSTREAMUDP:
+                {
                     ReferenceCountUtil.retain(msg);
                     getPendingMessages().addFirst(seq -> msg.setSeq(seq));
                     return true;
-                case CLOSESTREAM:
-                case DATASTREAM:
+                }
+                case OPENSTREAMUDP:
+                {
                     ReferenceCountUtil.retain(msg);
-                    getPendingMessages().addLast(seq -> msg.setSeq(seq));
+                    getPendingMessages().addFirst(seq -> msg.setSeq(seq));
                     return true;
+                }
+                case CLOSESTREAM:
+                {
+                    UUID streamId = msg.getId();
+
+                    if (getClosedStreams().add(streamId))
+                    {
+                        Vars.TIMER.newTimeout(handle -> getClosedStreams().remove(streamId), 30L, TimeUnit.SECONDS);
+                        ReferenceCountUtil.retain(msg);
+                        getPendingMessages().addLast(seq -> msg.setSeq(seq));
+                        return true;
+                    }
+                    else if (force)
+                    {
+                        ReferenceCountUtil.retain(msg);
+                        getPendingMessages().addLast(seq -> msg.setSeq(seq));
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                case DATASTREAM:
+                {
+                    UUID streamId = msg.getId();
+
+                    if (!getClosedStreams().contains(streamId) || force)
+                    {
+                        ReferenceCountUtil.retain(msg);
+                        getPendingMessages().addLast(seq -> msg.setSeq(seq));
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
                 default:
+                {
                     return false;
+                }
             }
         }
         finally
@@ -495,7 +585,12 @@ class LinkSession
 
     void writeAndFlush(Message msg)
     {
-        write(msg);
+        writeAndFlush(msg, false);
+    }
+
+    void writeAndFlush(Message msg, boolean force)
+    {
+        write(msg, force);
         flush();
     }
 

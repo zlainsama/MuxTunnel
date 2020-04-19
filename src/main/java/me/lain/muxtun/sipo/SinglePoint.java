@@ -32,7 +32,7 @@ import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.FrameCodec;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.codec.MessageCodec;
-import me.lain.muxtun.message.SnappyCodec;
+import me.lain.muxtun.codec.SnappyCodec;
 import me.lain.muxtun.util.SimpleLogger;
 
 public class SinglePoint

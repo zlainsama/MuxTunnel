@@ -1,4 +1,4 @@
-package me.lain.muxtun.message;
+package me.lain.muxtun.codec;
 
 import io.netty.channel.CombinedChannelDuplexHandler;
 
