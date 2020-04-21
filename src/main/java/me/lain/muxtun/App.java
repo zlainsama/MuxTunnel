@@ -34,7 +34,7 @@ public class App
 
         public SocketAddress bindAddress = null;
         public SocketAddress remoteAddress = null;
-        public Supplier<ProxyHandler> proxySupplier = null;
+        public List<Supplier<ProxyHandler>> proxySuppliers = new ArrayList<>();
         public Path pathCert = null;
         public Path pathKey = null;
         public List<String> trustSha1 = new ArrayList<>();
@@ -56,7 +56,7 @@ public class App
             return new SinglePointConfig(
                     bindAddress,
                     remoteAddress,
-                    proxySupplier,
+                    Shared.RoundRobinSupplier.of(proxySuppliers),
                     sslCtx,
                     targetAddress,
                     numLinksPerSession,
@@ -156,7 +156,7 @@ public class App
                     String host = value.substring(0, i1);
                     int port = Integer.parseInt(value.substring(i1 + 1));
                     SocketAddress proxyAddress = new InetSocketAddress(host, port);
-                    getConfig(profile).proxySupplier = () -> new Socks5ProxyHandler(proxyAddress);
+                    getConfig(profile).proxySuppliers.add(() -> new Socks5ProxyHandler(proxyAddress));
                 }
                 else if ("pathCert".equals(name))
                 {
@@ -209,7 +209,7 @@ public class App
                     SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "remoteAddress");
                     failed = true;
                 }
-                if (config.proxySupplier == null)
+                if (config.proxySuppliers.isEmpty())
                 {
                     SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "proxyAddress(socks5Proxy)");
                     failed = true;
