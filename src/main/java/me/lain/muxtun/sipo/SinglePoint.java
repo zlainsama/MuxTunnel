@@ -46,7 +46,7 @@ public class SinglePoint
     private final LinkHandler[] linkHandlers;
     private final TCPStreamHandler tcpStreamHandler;
     private final UDPStreamHandler udpStreamHandler;
-    private final AtomicReference<Future<?>> scheduledMaintainLinks;
+    private final AtomicReference<Future<?>> scheduledMaintainTask;
 
     public SinglePoint(SinglePointConfig config)
     {
@@ -59,7 +59,7 @@ public class SinglePoint
         this.linkHandlers = IntStream.range(0, config.getNumSessions()).mapToObj(i -> new LinkHandler()).toArray(LinkHandler[]::new);
         this.tcpStreamHandler = TCPStreamHandler.DEFAULT;
         this.udpStreamHandler = new UDPStreamHandler(manager);
-        this.scheduledMaintainLinks = new AtomicReference<>();
+        this.scheduledMaintainTask = new AtomicReference<>();
     }
 
     private ChannelFuture initiateNewLink(LinkHandler linkHandler)
@@ -128,42 +128,49 @@ public class SinglePoint
         });
         return result.addListener(future -> {
             if (future.isSuccess())
-                Optional.ofNullable(scheduledMaintainLinks.getAndSet(GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(() -> {
+                Optional.ofNullable(scheduledMaintainTask.getAndSet(GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(() -> {
+                    manager.getSessions().values().forEach(session -> {
+                        if (!session.getMembers().isEmpty())
+                            session.getTimeoutCounter().set(0);
+                        else if (session.getTimeoutCounter().incrementAndGet() > 30)
+                            session.close();
+                    });
                     for (LinkHandler linkHandler : linkHandlers)
                     {
-                        linkHandler.getLinksCount().updateAndGet(i -> {
+                        int[] old = new int[1];
+                        if (linkHandler.getLinksCount().updateAndGet(i -> {
+                            old[0] = i;
                             if (i < config.getNumLinksPerSession())
-                            {
                                 i += 1;
-
-                                initiateNewLink(linkHandler).addListener(new ChannelFutureListener()
-                                {
-
-                                    @Override
-                                    public void operationComplete(ChannelFuture future) throws Exception
-                                    {
-                                        if (future.isSuccess())
-                                        {
-                                            future.channel().closeFuture().addListener(closeFuture -> {
-                                                linkHandler.getLinksCount().updateAndGet(decrementIfPositive);
-
-                                                future.channel().eventLoop().execute(() -> {
-                                                    Throwable error = Vars.ChannelError.get(future.channel());
-                                                    if (error != null)
-                                                        SimpleLogger.println("%s > [%s] link %s closed with unexpected error. (%s)", Shared.printNow(), config.getName(), future.channel().id(), error);
-                                                });
-                                            });
-                                        }
-                                        else
-                                        {
-                                            linkHandler.getLinksCount().updateAndGet(decrementIfPositive);
-                                        }
-                                    }
-
-                                });
-                            }
                             return i;
-                        });
+                        }) != old[0])
+                        {
+                            initiateNewLink(linkHandler).addListener(new ChannelFutureListener()
+                            {
+
+                                @Override
+                                public void operationComplete(ChannelFuture future) throws Exception
+                                {
+                                    if (future.isSuccess())
+                                    {
+                                        future.channel().closeFuture().addListener(closeFuture -> {
+                                            linkHandler.getLinksCount().updateAndGet(decrementIfPositive);
+
+                                            future.channel().eventLoop().execute(() -> {
+                                                Throwable error = Vars.ChannelError.get(future.channel());
+                                                if (error != null)
+                                                    SimpleLogger.println("%s > [%s] link %s closed with unexpected error. (%s)", Shared.printNow(), config.getName(), future.channel().id(), error);
+                                            });
+                                        });
+                                    }
+                                    else
+                                    {
+                                        linkHandler.getLinksCount().updateAndGet(decrementIfPositive);
+                                    }
+                                }
+
+                            });
+                        }
                     }
                 }, 1L, 1L, TimeUnit.SECONDS))).ifPresent(scheduled -> scheduled.cancel(false));
             else
@@ -246,7 +253,7 @@ public class SinglePoint
 
     public Future<Void> stop()
     {
-        return channels.close().addListener(future -> Optional.ofNullable(scheduledMaintainLinks.getAndSet(null)).ifPresent(scheduled -> scheduled.cancel(false)));
+        return channels.close().addListener(future -> Optional.ofNullable(scheduledMaintainTask.getAndSet(null)).ifPresent(scheduled -> scheduled.cancel(false)));
     }
 
     @Override
