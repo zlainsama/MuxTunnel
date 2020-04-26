@@ -32,7 +32,6 @@ import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.FrameCodec;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.codec.MessageCodec;
-import me.lain.muxtun.codec.SnappyCodec;
 import me.lain.muxtun.util.SimpleLogger;
 
 public class SinglePoint
@@ -65,7 +64,7 @@ public class SinglePoint
     private ChannelFuture initiateNewLink(LinkHandler linkHandler)
     {
         return new Bootstrap()
-                .group(Vars.LINKS)
+                .group(Vars.WORKERS)
                 .channel(Shared.NettyObjects.classSocketChannel)
                 .handler(new ChannelInitializer<SocketChannel>()
                 {
@@ -91,7 +90,6 @@ public class SinglePoint
                         ch.pipeline().addLast(config.getSslCtx().newHandler(ch.alloc()));
                         ch.pipeline().addLast(new ChunkedWriteHandler());
                         ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
-                        ch.pipeline().addLast(new SnappyCodec());
                         ch.pipeline().addLast(new FrameCodec());
                         ch.pipeline().addLast(MessageCodec.DEFAULT);
                         ch.pipeline().addLast(linkHandler);
@@ -121,7 +119,7 @@ public class SinglePoint
     public Future<Void> start()
     {
         Promise<Void> result = new DefaultPromise<>(GlobalEventExecutor.INSTANCE);
-        GlobalEventExecutor.INSTANCE.submit(() -> {
+        GlobalEventExecutor.INSTANCE.execute(() -> {
             PromiseCombiner combiner = new PromiseCombiner(GlobalEventExecutor.INSTANCE);
             combiner.addAll(startTCPStreamService(), startUDPStreamService());
             combiner.finish(result);
@@ -159,7 +157,10 @@ public class SinglePoint
                                             future.channel().eventLoop().execute(() -> {
                                                 Throwable error = Vars.ChannelError.get(future.channel());
                                                 if (error != null)
+                                                {
+                                                    error.printStackTrace();
                                                     SimpleLogger.println("%s > [%s] link %s closed with unexpected error. (%s)", Shared.printNow(), config.getName(), future.channel().id(), error);
+                                                }
                                             });
                                         });
                                     }
@@ -181,7 +182,7 @@ public class SinglePoint
     private ChannelFuture startTCPStreamService()
     {
         return new ServerBootstrap()
-                .group(Vars.BOSS, Vars.STREAMS)
+                .group(Vars.WORKERS)
                 .channel(Shared.NettyObjects.classServerSocketChannel)
                 .childHandler(new ChannelInitializer<SocketChannel>()
                 {
@@ -232,7 +233,7 @@ public class SinglePoint
     private ChannelFuture startUDPStreamService()
     {
         return new Bootstrap()
-                .group(Vars.BOSS)
+                .group(Vars.WORKERS)
                 .channel(Shared.NettyObjects.classDatagramChannel)
                 .handler(new ChannelInitializer<DatagramChannel>()
                 {
