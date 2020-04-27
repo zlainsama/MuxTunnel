@@ -23,7 +23,6 @@ import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
-import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.concurrent.Promise;
@@ -118,7 +117,7 @@ public class SinglePoint
 
     public Future<Void> start()
     {
-        Promise<Void> result = new DefaultPromise<>(GlobalEventExecutor.INSTANCE);
+        Promise<Void> result = GlobalEventExecutor.INSTANCE.newPromise();
         GlobalEventExecutor.INSTANCE.execute(() -> {
             PromiseCombiner combiner = new PromiseCombiner(GlobalEventExecutor.INSTANCE);
             combiner.addAll(startTCPStreamService(), startUDPStreamService());
@@ -254,7 +253,10 @@ public class SinglePoint
 
     public Future<Void> stop()
     {
-        return channels.close().addListener(future -> Optional.ofNullable(scheduledMaintainTask.getAndSet(null)).ifPresent(scheduled -> scheduled.cancel(false)));
+        return channels.close().addListener(future -> {
+            manager.getSessions().values().forEach(LinkSession::close);
+            Optional.ofNullable(scheduledMaintainTask.getAndSet(null)).ifPresent(scheduled -> scheduled.cancel(false));
+        });
     }
 
     @Override
