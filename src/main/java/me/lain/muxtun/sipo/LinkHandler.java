@@ -148,9 +148,10 @@ class LinkHandler extends ChannelDuplexHandler
                         LinkSession session = lctx.getSession();
                         int seq = msg.getSeq();
 
-                        if (session.getFlowControl().inRange(seq))
+                        boolean inRange;
+                        if (inRange = session.getFlowControl().inRange(seq))
                             session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(seq)));
+                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(inRange ? seq : ack - 1)));
                     }
                     else
                     {
@@ -165,9 +166,10 @@ class LinkHandler extends ChannelDuplexHandler
                         LinkSession session = lctx.getSession();
                         int seq = msg.getSeq();
 
-                        if (session.getFlowControl().inRange(seq))
+                        boolean inRange;
+                        if (inRange = session.getFlowControl().inRange(seq))
                             session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(seq)));
+                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(inRange ? seq : ack - 1)));
                     }
                     else
                     {
@@ -182,9 +184,10 @@ class LinkHandler extends ChannelDuplexHandler
                         LinkSession session = lctx.getSession();
                         int seq = msg.getSeq();
 
-                        if (session.getFlowControl().inRange(seq))
+                        boolean inRange;
+                        if (inRange = session.getFlowControl().inRange(seq))
                             session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(seq)));
+                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(inRange ? seq : ack - 1)));
                     }
                     else
                     {
@@ -199,9 +202,10 @@ class LinkHandler extends ChannelDuplexHandler
                         LinkSession session = lctx.getSession();
                         int seq = msg.getSeq();
 
-                        if (session.getFlowControl().inRange(seq))
+                        boolean inRange;
+                        if (inRange = session.getFlowControl().inRange(seq))
                             session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(seq)));
+                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(inRange ? seq : ack - 1)));
                     }
                     else
                     {

@@ -55,7 +55,7 @@ class StreamBridge extends EmbeddedChannel implements Consumer<ByteBuf>
 
             private void handleMessage(StreamContext sctx, ByteBuf msg) throws Exception
             {
-                if (sctx.isActive() && !sctx.getPayloadWriter().writeSlices(msg.retain(), 65536, null))
+                if (sctx.isActive() && !sctx.getPayloadWriter().writeSlices(msg.retain()))
                     sctx.close();
             }
 

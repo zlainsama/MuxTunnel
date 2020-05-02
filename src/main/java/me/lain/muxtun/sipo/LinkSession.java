@@ -97,11 +97,7 @@ class LinkSession
                 {
                     ReferenceCountUtil.release(removed);
                 }
-
-                return true;
             }
-
-            return false;
         }, ack, sack) > 0 && isActive() && !getPendingMessages().isEmpty())
             flush();
     }
