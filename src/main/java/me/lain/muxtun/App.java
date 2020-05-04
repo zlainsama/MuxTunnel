@@ -280,7 +280,7 @@ public class App
                 futures.addAll(points.stream().map(SinglePoint::stop).collect(Collectors.toList()));
                 futures.forEach(Future::syncUninterruptibly);
                 SimpleLogger.println("%s > Done.", Shared.printNow());
-                SimpleLogger.flush();
+                SimpleLogger.ensureFlushed();
             }
 
         });
