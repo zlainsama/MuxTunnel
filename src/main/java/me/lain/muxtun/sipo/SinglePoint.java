@@ -155,7 +155,7 @@ public class SinglePoint
                                                 Throwable error = Vars.ChannelError.get(future.channel());
                                                 if (error != null)
                                                 {
-                                                    SimpleLogger.execute(() -> error.printStackTrace());
+                                                    SimpleLogger.printStackTrace(error);
                                                     SimpleLogger.println("%s > [%s] link %s closed with unexpected error. (%s)", Shared.printNow(), config.getName(), future.channel().id(), error);
                                                 }
                                             });
