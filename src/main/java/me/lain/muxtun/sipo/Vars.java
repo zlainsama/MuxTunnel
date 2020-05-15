@@ -7,7 +7,6 @@ import io.netty.util.AttributeKey;
 import io.netty.util.HashedWheelTimer;
 import io.netty.util.Timer;
 import io.netty.util.concurrent.DefaultThreadFactory;
-import io.netty.util.concurrent.EventExecutorGroup;
 import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.Message;
 
@@ -52,9 +51,8 @@ class Vars
 
     static final Timer TIMER = new HashedWheelTimer(new DefaultThreadFactory("timer", true));
 
-    static final int NUMTHREADS = Math.max(4, Math.min(Runtime.getRuntime().availableProcessors() * 2, Short.MAX_VALUE));
+    static final int NUMTHREADS = Math.max(4, Math.min(Runtime.getRuntime().availableProcessors(), Short.MAX_VALUE));
     static final EventLoopGroup WORKERS = Shared.NettyObjects.getOrCreateEventLoopGroup("workersGroup", NUMTHREADS);
-    static final EventExecutorGroup SESSIONS = Shared.NettyObjects.getOrCreateEventExecutorGroup("sessionsGroup", NUMTHREADS);
 
     static final Message PLACEHOLDER = new Message()
     {
