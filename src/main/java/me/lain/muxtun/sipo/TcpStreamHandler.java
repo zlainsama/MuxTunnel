@@ -7,10 +7,10 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.ReferenceCountUtil;
 
 @Sharable
-class TCPStreamHandler extends ChannelInboundHandlerAdapter
+class TcpStreamHandler extends ChannelInboundHandlerAdapter
 {
 
-    static final TCPStreamHandler DEFAULT = new TCPStreamHandler();
+    static final TcpStreamHandler DEFAULT = new TcpStreamHandler();
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception

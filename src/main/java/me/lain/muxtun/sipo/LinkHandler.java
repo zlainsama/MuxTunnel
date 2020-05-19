@@ -75,6 +75,7 @@ class LinkHandler extends ChannelDuplexHandler
             {
                 case PING:
                 {
+                    lctx.getSRTT().reset();
                     break;
                 }
                 case JOINSESSION:
@@ -105,7 +106,7 @@ class LinkHandler extends ChannelDuplexHandler
                                         boolean[] created = new boolean[] { false };
                                         LinkSession session = lctx.getManager().getSessions().computeIfAbsent(sessionId, key -> {
                                             created[0] = true;
-                                            return new LinkSession(key, lctx.getManager(), Vars.WORKERS.next(), null);
+                                            return new LinkSession(key, lctx.getManager(), Vars.SESSIONS.next(), null);
                                         });
                                         if (session.join(lctx.getChannel()))
                                         {

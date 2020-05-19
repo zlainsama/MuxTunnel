@@ -18,7 +18,6 @@ import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.flush.FlushConsolidationHandler;
-import io.netty.handler.stream.ChunkedWriteHandler;
 import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
@@ -41,8 +40,8 @@ public class SinglePoint
     private final ChannelGroup channels;
     private final LinkManager manager;
     private final LinkHandler[] linkHandlers;
-    private final TCPStreamHandler tcpStreamHandler;
-    private final UDPStreamHandler udpStreamHandler;
+    private final TcpStreamHandler tcpStreamHandler;
+    private final UdpStreamHandler udpStreamHandler;
     private final AtomicReference<Future<?>> scheduledMaintainTask;
 
     public SinglePoint(SinglePointConfig config)
@@ -54,8 +53,8 @@ public class SinglePoint
                 channels.add(future.channel());
         }, config.getTargetAddress(), config.getMaxCLF()));
         this.linkHandlers = IntStream.range(0, config.getNumSessions()).mapToObj(i -> new LinkHandler()).toArray(LinkHandler[]::new);
-        this.tcpStreamHandler = TCPStreamHandler.DEFAULT;
-        this.udpStreamHandler = new UDPStreamHandler(manager);
+        this.tcpStreamHandler = TcpStreamHandler.DEFAULT;
+        this.udpStreamHandler = new UdpStreamHandler(manager);
         this.scheduledMaintainTask = new AtomicReference<>();
     }
 
@@ -84,10 +83,9 @@ public class SinglePoint
 
                         });
                         ch.pipeline().addLast(new WriteTimeoutHandler(30));
+                        ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
                         ch.pipeline().addLast(config.getProxySupplier().get());
                         ch.pipeline().addLast(config.getSslCtx().newHandler(ch.alloc()));
-                        ch.pipeline().addLast(new ChunkedWriteHandler());
-                        ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
                         ch.pipeline().addLast(new MessageCodec());
                         ch.pipeline().addLast(linkHandler);
                     }
@@ -213,7 +211,6 @@ public class SinglePoint
                             request.addListener(future -> ch.closeFuture().removeListener(taskCancelRequest));
                         }
 
-                        ch.pipeline().addLast(new ChunkedWriteHandler());
                         ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
                         ch.pipeline().addLast(tcpStreamHandler);
                     }
@@ -238,7 +235,6 @@ public class SinglePoint
                     @Override
                     protected void initChannel(DatagramChannel ch) throws Exception
                     {
-                        ch.pipeline().addLast(new ChunkedWriteHandler());
                         ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
                         ch.pipeline().addLast(udpStreamHandler);
                     }

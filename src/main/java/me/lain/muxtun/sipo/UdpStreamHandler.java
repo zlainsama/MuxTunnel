@@ -12,13 +12,13 @@ import io.netty.util.ReferenceCountUtil;
 import me.lain.muxtun.codec.Message.MessageType;
 
 @Sharable
-class UDPStreamHandler extends ChannelInboundHandlerAdapter
+class UdpStreamHandler extends ChannelInboundHandlerAdapter
 {
 
     private final LinkManager manager;
     private final Map<InetSocketAddress, StreamBridge> bridges;
 
-    UDPStreamHandler(LinkManager manager)
+    UdpStreamHandler(LinkManager manager)
     {
         this.manager = manager;
         this.bridges = new ConcurrentHashMap<>();
