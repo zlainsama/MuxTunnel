@@ -54,7 +54,7 @@ class UdpStreamHandler extends ChannelInboundHandlerAdapter
                     bridge.newSucceededFuture().addListener(manager.getResources().getChannelAccumulator());
                     bridge.closeFuture().addListener(future -> bridges.remove(sender, bridge));
 
-                    RelayRequest request = manager.newUDPRelayRequest(ctx.channel().eventLoop());
+                    RelayRequest request = manager.newUdpRelayRequest(ctx.channel().eventLoop());
                     if (!request.addListener(future -> {
                         if (future.isSuccess())
                         {

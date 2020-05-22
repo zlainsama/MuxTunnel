@@ -104,7 +104,10 @@ public class SinglePoint
                         if (future.isSuccess())
                         {
                             RandomSession s = linkHandler.getRandomSession(false);
-                            future.channel().writeAndFlush(MessageType.JOINSESSION.create().setId(s.getSessionId()).setBuf(Unpooled.wrappedBuffer(s.getChallenge())));
+                            future.channel().writeAndFlush(MessageType.JOINSESSION.create()
+                                    .setId(s.getSessionId())
+                                    .setId2(manager.getResources().getTargetAddress())
+                                    .setBuf(Unpooled.wrappedBuffer(s.getChallenge())));
                         }
                     }
 
@@ -116,7 +119,7 @@ public class SinglePoint
         Promise<Void> result = GlobalEventExecutor.INSTANCE.newPromise();
         GlobalEventExecutor.INSTANCE.execute(() -> {
             PromiseCombiner combiner = new PromiseCombiner(GlobalEventExecutor.INSTANCE);
-            combiner.addAll(startTCPStreamService(), startUDPStreamService());
+            combiner.addAll(startTcpStreamService(), startUdpStreamService());
             combiner.finish(result);
         });
         return result.addListener(future -> {
@@ -174,7 +177,7 @@ public class SinglePoint
         });
     }
 
-    private ChannelFuture startTCPStreamService()
+    private ChannelFuture startTcpStreamService()
     {
         return new ServerBootstrap()
                 .group(Vars.WORKERS)
@@ -187,7 +190,7 @@ public class SinglePoint
                     {
                         ch.newSucceededFuture().addListener(manager.getResources().getChannelAccumulator());
 
-                        RelayRequest request = manager.newTCPRelayRequest(ch.eventLoop());
+                        RelayRequest request = manager.newTcpRelayRequest(ch.eventLoop());
                         if (!request.addListener(future -> {
                             if (future.isSuccess())
                             {
@@ -224,7 +227,7 @@ public class SinglePoint
                 .addListener(manager.getResources().getChannelAccumulator());
     }
 
-    private ChannelFuture startUDPStreamService()
+    private ChannelFuture startUdpStreamService()
     {
         return new Bootstrap()
                 .group(Vars.WORKERS)

@@ -106,7 +106,7 @@ class LinkHandler extends ChannelDuplexHandler
                                         boolean[] created = new boolean[] { false };
                                         LinkSession session = lctx.getManager().getSessions().computeIfAbsent(sessionId, key -> {
                                             created[0] = true;
-                                            return new LinkSession(key, lctx.getManager(), Vars.SESSIONS.next(), null);
+                                            return new LinkSession(key, lctx.getManager(), Vars.SESSIONS.next());
                                         });
                                         if (session.join(lctx.getChannel()))
                                         {
@@ -114,8 +114,8 @@ class LinkHandler extends ChannelDuplexHandler
 
                                             if (created[0])
                                             {
-                                                IntStream.range(0, lctx.getManager().getTCPRelayRequests().size()).forEach(i -> session.writeAndFlush(MessageType.OPENSTREAM.create().setId(lctx.getManager().getResources().getTargetAddress())));
-                                                IntStream.range(0, lctx.getManager().getUDPRelayRequests().size()).forEach(i -> session.writeAndFlush(MessageType.OPENSTREAMUDP.create().setId(lctx.getManager().getResources().getTargetAddress())));
+                                                IntStream.range(0, lctx.getManager().getTcpRelayRequests().size()).forEach(i -> session.writeAndFlush(MessageType.OPENSTREAM.create()));
+                                                IntStream.range(0, lctx.getManager().getUdpRelayRequests().size()).forEach(i -> session.writeAndFlush(MessageType.OPENSTREAMUDP.create()));
                                             }
                                         }
                                         else

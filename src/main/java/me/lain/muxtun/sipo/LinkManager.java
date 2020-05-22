@@ -37,33 +37,33 @@ class LinkManager
         return sessions;
     }
 
-    Queue<RelayRequest> getTCPRelayRequests()
+    Queue<RelayRequest> getTcpRelayRequests()
     {
         return tcpRelayRequests;
     }
 
-    Queue<RelayRequest> getUDPRelayRequests()
+    Queue<RelayRequest> getUdpRelayRequests()
     {
         return udpRelayRequests;
     }
 
-    RelayRequest newTCPRelayRequest(EventExecutor executor)
+    RelayRequest newTcpRelayRequest(EventExecutor executor)
     {
         RelayRequest request = new RelayRequest(executor);
-        if (!getTCPRelayRequests().offer(request))
+        if (!getTcpRelayRequests().offer(request))
             request.tryFailure(new IllegalStateException());
         else if (!request.isDone())
-            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).limit(1).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAM.create().setId(getResources().getTargetAddress())));
+            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).limit(1).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAM.create()));
         return request;
     }
 
-    RelayRequest newUDPRelayRequest(EventExecutor executor)
+    RelayRequest newUdpRelayRequest(EventExecutor executor)
     {
         RelayRequest request = new RelayRequest(executor);
-        if (!getUDPRelayRequests().offer(request))
+        if (!getUdpRelayRequests().offer(request))
             request.tryFailure(new IllegalStateException());
         else if (!request.isDone())
-            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).limit(1).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAMUDP.create().setId(getResources().getTargetAddress())));
+            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).limit(1).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAMUDP.create()));
         return request;
     }
 

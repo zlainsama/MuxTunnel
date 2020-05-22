@@ -31,7 +31,6 @@ class LinkSession
     private final UUID sessionId;
     private final LinkManager manager;
     private final EventExecutor executor;
-    private final byte[] challenge;
     private final AtomicBoolean closed;
     private final FlowControl flowControl;
     private final Map<Integer, Message> inboundBuffer;
@@ -42,12 +41,11 @@ class LinkSession
     private final Set<UUID> closedStreams;
     private final AtomicInteger timeoutCounter;
 
-    LinkSession(UUID sessionId, LinkManager manager, EventExecutor executor, byte[] challenge)
+    LinkSession(UUID sessionId, LinkManager manager, EventExecutor executor)
     {
         this.sessionId = sessionId;
         this.manager = manager;
         this.executor = executor;
-        this.challenge = challenge;
         this.closed = new AtomicBoolean();
         this.flowControl = new FlowControl();
         this.inboundBuffer = new ConcurrentHashMap<>();
@@ -113,34 +111,33 @@ class LinkSession
 
     private void close0()
     {
-        if (closed.compareAndSet(false, true))
+        closed.set(true);
+
+        manager.getSessions().remove(sessionId, this);
+
+        while (!members.isEmpty())
         {
-            manager.getSessions().remove(sessionId, this);
-
-            while (!members.isEmpty())
-            {
-                members.removeAll(members.stream().peek(Channel::close).collect(Collectors.toList()));
-            }
-            while (!streams.isEmpty())
-            {
-                streams.values().removeAll(streams.values().stream().peek(StreamContext::close).collect(Collectors.toList()));
-            }
-            closedStreams.clear();
-            while (!inboundBuffer.isEmpty())
-            {
-                inboundBuffer.values().removeAll(inboundBuffer.values().stream().peek(ReferenceCountUtil::release).collect(Collectors.toList()));
-            }
-            while (!outboundBuffer.isEmpty())
-            {
-                outboundBuffer.values().removeAll(outboundBuffer.values().stream().peek(ReferenceCountUtil::release).collect(Collectors.toList()));
-            }
-            while (!pendingMessages.isEmpty())
-            {
-                pendingMessages.removeAll(pendingMessages.stream().peek(ReferenceCountUtil::release).collect(Collectors.toList()));
-            }
-
-            System.gc();
+            members.removeAll(members.stream().peek(Channel::close).collect(Collectors.toList()));
         }
+        while (!streams.isEmpty())
+        {
+            streams.values().removeAll(streams.values().stream().peek(StreamContext::close).collect(Collectors.toList()));
+        }
+        closedStreams.clear();
+        while (!inboundBuffer.isEmpty())
+        {
+            inboundBuffer.values().removeAll(inboundBuffer.values().stream().peek(ReferenceCountUtil::release).collect(Collectors.toList()));
+        }
+        while (!outboundBuffer.isEmpty())
+        {
+            outboundBuffer.values().removeAll(outboundBuffer.values().stream().peek(ReferenceCountUtil::release).collect(Collectors.toList()));
+        }
+        while (!pendingMessages.isEmpty())
+        {
+            pendingMessages.removeAll(pendingMessages.stream().peek(ReferenceCountUtil::release).collect(Collectors.toList()));
+        }
+
+        System.gc();
     }
 
     boolean drop(Channel channel)
@@ -261,7 +258,7 @@ class LinkSession
                             if (msg != null && isActive())
                             {
                                 Optional<Channel> link = getMembers().stream().sequential()
-                                        .filter(channel -> channel.isActive() && channel.isWritable())
+                                        .filter(channel -> channel.isActive() && channel.isWritable() && LinkContext.getContext(channel).getSession() == LinkSession.this)
                                         .sorted(LinkContext.SORTER)
                                         .filter(channel -> LinkContext.getContext(channel).getTasks().putIfAbsent(seq, this) == null)
                                         .findFirst();
@@ -298,11 +295,6 @@ class LinkSession
                 return false;
             });
         }
-    }
-
-    byte[] getChallenge()
-    {
-        return challenge;
     }
 
     Set<UUID> getClosedStreams()
@@ -384,12 +376,12 @@ class LinkSession
                     if (getClosedStreams().contains(streamId))
                     {
                         writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId), true);
-                        writeAndFlush(MessageType.OPENSTREAM.create().setId(getManager().getResources().getTargetAddress()));
+                        writeAndFlush(MessageType.OPENSTREAM.create());
                     }
                     else
                     {
                         RelayRequest request;
-                        while ((request = getManager().getTCPRelayRequests().poll()) != null)
+                        while ((request = getManager().getTcpRelayRequests().poll()) != null)
                         {
                             if (!request.setUncancellable())
                                 continue;
@@ -403,9 +395,9 @@ class LinkSession
                         }
                     }
                 }
-                else if (!getManager().getTCPRelayRequests().isEmpty())
+                else if (!getManager().getTcpRelayRequests().isEmpty())
                 {
-                    writeAndFlush(MessageType.OPENSTREAM.create().setId(getManager().getResources().getTargetAddress()));
+                    writeAndFlush(MessageType.OPENSTREAM.create());
                 }
 
                 break;
@@ -419,12 +411,12 @@ class LinkSession
                     if (getClosedStreams().contains(streamId))
                     {
                         writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId), true);
-                        writeAndFlush(MessageType.OPENSTREAMUDP.create().setId(getManager().getResources().getTargetAddress()));
+                        writeAndFlush(MessageType.OPENSTREAMUDP.create());
                     }
                     else
                     {
                         RelayRequest request;
-                        while ((request = getManager().getUDPRelayRequests().poll()) != null)
+                        while ((request = getManager().getUdpRelayRequests().poll()) != null)
                         {
                             if (!request.setUncancellable())
                                 continue;
@@ -438,9 +430,9 @@ class LinkSession
                         }
                     }
                 }
-                else if (!getManager().getUDPRelayRequests().isEmpty())
+                else if (!getManager().getUdpRelayRequests().isEmpty())
                 {
-                    writeAndFlush(MessageType.OPENSTREAMUDP.create().setId(getManager().getResources().getTargetAddress()));
+                    writeAndFlush(MessageType.OPENSTREAMUDP.create());
                 }
 
                 break;
@@ -553,14 +545,14 @@ class LinkSession
             {
                 switch (msg.type())
                 {
-//                  case OPENSTREAM:
-//                  case OPENSTREAMUDP:
-//                  {
-//                      if (getInboundBuffer().replace(seq, msg, Vars.PLACEHOLDER))
-//                          ReferenceCountUtil.release(handleMessage0(msg));
-//
-//                      break;
-//                  }
+                    case OPENSTREAM:
+                    case OPENSTREAMUDP:
+                    {
+                        if (getInboundBuffer().replace(seq, msg, Vars.PLACEHOLDER))
+                            ReferenceCountUtil.release(handleMessage0(msg));
+
+                        break;
+                    }
                     case CLOSESTREAM:
                     case DATASTREAM:
                     {
