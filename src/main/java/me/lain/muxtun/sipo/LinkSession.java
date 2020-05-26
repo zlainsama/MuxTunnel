@@ -230,6 +230,8 @@ class LinkSession
                     getExecutor().execute(new Runnable()
                     {
 
+                        long lastRTO = 250L;
+
                         boolean duplicate(Message msg, Consumer<Message> action, Consumer<Throwable> logger)
                         {
                             try
@@ -269,7 +271,7 @@ class LinkSession
 
                                     if (duplicate(msg, context::writeAndFlush, SimpleLogger::printStackTrace))
                                     {
-                                        Vars.TIMER.newTimeout(handle -> getExecutor().execute(this), context.getSRTT().rto(), TimeUnit.MILLISECONDS);
+                                        Vars.TIMER.newTimeout(handle -> getExecutor().execute(this), lastRTO = context.getSRTT().rto(), TimeUnit.MILLISECONDS);
                                     }
                                     else
                                     {
@@ -278,7 +280,7 @@ class LinkSession
                                 }
                                 else
                                 {
-                                    Vars.TIMER.newTimeout(handle -> getExecutor().execute(this), 1L, TimeUnit.SECONDS);
+                                    Vars.TIMER.newTimeout(handle -> getExecutor().execute(this), lastRTO, TimeUnit.MILLISECONDS);
                                 }
                             }
                             else
