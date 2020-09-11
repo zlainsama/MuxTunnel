@@ -125,12 +125,7 @@ public class SinglePoint
         return result.addListener(future -> {
             if (future.isSuccess())
                 Optional.ofNullable(scheduledMaintainTask.getAndSet(GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(() -> {
-                    manager.getSessions().values().forEach(session -> {
-                        if (!session.getMembers().isEmpty())
-                            session.getTimeoutCounter().set(0);
-                        else if (session.getTimeoutCounter().incrementAndGet() > 30)
-                            session.close();
-                    });
+                    manager.getSessions().values().forEach(LinkSession::tick);
                     for (LinkHandler linkHandler : linkHandlers)
                     {
                         int[] old = new int[1];

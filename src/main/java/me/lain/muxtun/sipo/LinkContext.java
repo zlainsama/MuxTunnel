@@ -2,13 +2,10 @@ package me.lain.muxtun.sipo;
 
 import java.util.Comparator;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
-import io.netty.util.Timeout;
+import io.netty.util.concurrent.EventExecutor;
 import me.lain.muxtun.util.RoundTripTimeMeasurement;
 import me.lain.muxtun.util.SmoothedRoundTripTime;
 
@@ -27,8 +24,8 @@ class LinkContext
 
     private final LinkManager manager;
     private final Channel channel;
+    private final EventExecutor executor;
     private final RoundTripTimeMeasurement RTTM;
-    private final AtomicReference<Timeout> scheduledMeasurementTimeoutUpdater;
     private final SmoothedRoundTripTime SRTT;
     private final Map<Integer, Runnable> tasks;
     private volatile LinkSession session;
@@ -37,8 +34,8 @@ class LinkContext
     {
         this.manager = manager;
         this.channel = channel;
+        this.executor = channel.eventLoop();
         this.RTTM = new RoundTripTimeMeasurement();
-        this.scheduledMeasurementTimeoutUpdater = new AtomicReference<>();
         this.SRTT = new SmoothedRoundTripTime()
         {
 
@@ -60,12 +57,17 @@ class LinkContext
 
     ChannelFuture close()
     {
-        return getChannel().close();
+        return channel.close();
     }
 
     Channel getChannel()
     {
         return channel;
+    }
+
+    EventExecutor getExecutor()
+    {
+        return executor;
     }
 
     LinkManager getManager()
@@ -95,15 +97,7 @@ class LinkContext
 
     boolean isActive()
     {
-        return getChannel().isActive();
-    }
-
-    void scheduledMeasurementTimeoutUpdater(boolean initiate)
-    {
-        Optional.ofNullable(scheduledMeasurementTimeoutUpdater.getAndSet(initiate ? Vars.TIMER.newTimeout(handle -> getChannel().eventLoop().submit(() -> {
-            if (isActive())
-                getRTTM().updateIf(rtt -> rtt >= 5000L).ifPresent(getSRTT()::updateAndGet);
-        }), 5L, TimeUnit.SECONDS) : null)).ifPresent(Timeout::cancel);
+        return channel.isActive();
     }
 
     LinkContext setSession(LinkSession session)
@@ -112,9 +106,25 @@ class LinkContext
         return this;
     }
 
+    void tick()
+    {
+        if (isActive())
+        {
+            if (getExecutor().inEventLoop())
+                tick0();
+            else
+                getExecutor().execute(() -> tick0());
+        }
+    }
+
+    private void tick0()
+    {
+        getRTTM().updateIf(rtt -> rtt >= 2000L).ifPresent(getSRTT()::updateAndGet);
+    }
+
     ChannelFuture writeAndFlush(Object msg)
     {
-        return getChannel().writeAndFlush(msg);
+        return channel.writeAndFlush(msg);
     }
 
 }
