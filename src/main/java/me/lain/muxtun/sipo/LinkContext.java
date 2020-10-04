@@ -40,7 +40,7 @@ class LinkContext
         {
 
             @Override
-            public synchronized long updateAndGet(long RTT)
+            public long updateAndGet(long RTT)
             {
                 long result = super.updateAndGet(RTT);
 
