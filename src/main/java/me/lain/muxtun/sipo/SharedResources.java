@@ -1,34 +1,30 @@
 package me.lain.muxtun.sipo;
 
-import java.util.UUID;
 import io.netty.channel.ChannelFutureListener;
 
-class SharedResources
-{
+import java.util.UUID;
+
+class SharedResources {
 
     private final ChannelFutureListener channelAccumulator;
     private final UUID targetAddress;
     private final int maxCLF;
 
-    SharedResources(ChannelFutureListener channelAccumulator, UUID targetAddress, int maxCLF)
-    {
+    SharedResources(ChannelFutureListener channelAccumulator, UUID targetAddress, int maxCLF) {
         this.channelAccumulator = channelAccumulator;
         this.targetAddress = targetAddress;
         this.maxCLF = maxCLF;
     }
 
-    ChannelFutureListener getChannelAccumulator()
-    {
+    ChannelFutureListener getChannelAccumulator() {
         return channelAccumulator;
     }
 
-    int getMaxCLF()
-    {
+    int getMaxCLF() {
         return maxCLF;
     }
 
-    UUID getTargetAddress()
-    {
+    UUID getTargetAddress() {
         return targetAddress;
     }
 

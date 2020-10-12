@@ -1,16 +1,16 @@
 package me.lain.muxtun.sipo;
 
+import io.netty.util.concurrent.EventExecutor;
+import me.lain.muxtun.codec.Message.MessageType;
+
 import java.util.Comparator;
 import java.util.Map;
 import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import io.netty.util.concurrent.EventExecutor;
-import me.lain.muxtun.codec.Message.MessageType;
 
-class LinkManager
-{
+class LinkManager {
 
     static final Comparator<LinkSession> SORTER = Comparator.comparingInt(session -> session.getStreams().size() * 16 - session.getFlowControl().window());
 
@@ -19,36 +19,30 @@ class LinkManager
     private final Queue<RelayRequest> tcpRelayRequests;
     private final Queue<RelayRequest> udpRelayRequests;
 
-    LinkManager(SharedResources resources)
-    {
+    LinkManager(SharedResources resources) {
         this.resources = resources;
         this.sessions = new ConcurrentHashMap<>();
         this.tcpRelayRequests = new ConcurrentLinkedQueue<>();
         this.udpRelayRequests = new ConcurrentLinkedQueue<>();
     }
 
-    SharedResources getResources()
-    {
+    SharedResources getResources() {
         return resources;
     }
 
-    Map<UUID, LinkSession> getSessions()
-    {
+    Map<UUID, LinkSession> getSessions() {
         return sessions;
     }
 
-    Queue<RelayRequest> getTcpRelayRequests()
-    {
+    Queue<RelayRequest> getTcpRelayRequests() {
         return tcpRelayRequests;
     }
 
-    Queue<RelayRequest> getUdpRelayRequests()
-    {
+    Queue<RelayRequest> getUdpRelayRequests() {
         return udpRelayRequests;
     }
 
-    RelayRequest newTcpRelayRequest(EventExecutor executor)
-    {
+    RelayRequest newTcpRelayRequest(EventExecutor executor) {
         RelayRequest request = new RelayRequest(executor);
         if (!getTcpRelayRequests().offer(request))
             request.tryFailure(new IllegalStateException());
@@ -57,8 +51,7 @@ class LinkManager
         return request;
     }
 
-    RelayRequest newUdpRelayRequest(EventExecutor executor)
-    {
+    RelayRequest newUdpRelayRequest(EventExecutor executor) {
         RelayRequest request = new RelayRequest(executor);
         if (!getUdpRelayRequests().offer(request))
             request.tryFailure(new IllegalStateException());

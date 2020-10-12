@@ -4,34 +4,27 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.UUID;
 
-class RandomSession
-{
+class RandomSession {
 
     private final UUID sessionId;
     private final byte[] challenge;
 
-    RandomSession()
-    {
+    RandomSession() {
         sessionId = UUID.randomUUID();
         challenge = new byte[512];
 
-        try
-        {
+        try {
             SecureRandom.getInstanceStrong().nextBytes(challenge);
-        }
-        catch (NoSuchAlgorithmException e)
-        {
+        } catch (NoSuchAlgorithmException e) {
             throw new Error(e);
         }
     }
 
-    byte[] getChallenge()
-    {
+    byte[] getChallenge() {
         return challenge;
     }
 
-    UUID getSessionId()
-    {
+    UUID getSessionId() {
         return sessionId;
     }
 

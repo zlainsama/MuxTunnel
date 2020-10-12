@@ -1,18 +1,9 @@
 package me.lain.muxtun.sipo;
 
-import java.util.Optional;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.IntUnaryOperator;
-import java.util.stream.IntStream;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
+import io.netty.channel.*;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.socket.DatagramChannel;
@@ -29,10 +20,14 @@ import io.netty.util.concurrent.PromiseCombiner;
 import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.codec.MessageCodec;
-import me.lain.muxtun.util.SimpleLogger;
 
-public class SinglePoint
-{
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.IntUnaryOperator;
+import java.util.stream.IntStream;
+
+public class SinglePoint {
 
     private static final IntUnaryOperator decrementIfPositive = i -> i > 0 ? i - 1 : i;
 
@@ -44,8 +39,7 @@ public class SinglePoint
     private final UdpStreamHandler udpStreamHandler;
     private final AtomicReference<Future<?>> scheduledMaintainTask;
 
-    public SinglePoint(SinglePointConfig config)
-    {
+    public SinglePoint(SinglePointConfig config) {
         this.config = config;
         this.channels = new DefaultChannelGroup("SinglePoint", GlobalEventExecutor.INSTANCE, true);
         this.manager = new LinkManager(new SharedResources(future -> {
@@ -58,25 +52,20 @@ public class SinglePoint
         this.scheduledMaintainTask = new AtomicReference<>();
     }
 
-    private ChannelFuture initiateNewLink(LinkHandler linkHandler)
-    {
+    private ChannelFuture initiateNewLink(LinkHandler linkHandler) {
         return new Bootstrap()
                 .group(Vars.WORKERS)
                 .channel(Shared.NettyObjects.classSocketChannel)
-                .handler(new ChannelInitializer<SocketChannel>()
-                {
+                .handler(new ChannelInitializer<SocketChannel>() {
 
                     @Override
-                    protected void initChannel(SocketChannel ch) throws Exception
-                    {
+                    protected void initChannel(SocketChannel ch) throws Exception {
                         ch.attr(Vars.LINKCONTEXT_KEY).set(new LinkContext(manager, ch));
 
-                        ch.pipeline().addLast(new IdleStateHandler(0, 0, 60)
-                        {
+                        ch.pipeline().addLast(new IdleStateHandler(0, 0, 60) {
 
                             @Override
-                            protected void channelIdle(ChannelHandlerContext ctx, IdleStateEvent evt) throws Exception
-                            {
+                            protected void channelIdle(ChannelHandlerContext ctx, IdleStateEvent evt) throws Exception {
                                 if (evt.state() == IdleState.ALL_IDLE)
                                     ctx.channel().writeAndFlush(MessageType.PING.create());
                             }
@@ -95,14 +84,11 @@ public class SinglePoint
                 .option(ChannelOption.TCP_NODELAY, true)
                 .connect(config.getRemoteAddress())
                 .addListener(manager.getResources().getChannelAccumulator())
-                .addListener(new ChannelFutureListener()
-                {
+                .addListener(new ChannelFutureListener() {
 
                     @Override
-                    public void operationComplete(ChannelFuture future) throws Exception
-                    {
-                        if (future.isSuccess())
-                        {
+                    public void operationComplete(ChannelFuture future) throws Exception {
+                        if (future.isSuccess()) {
                             RandomSession s = linkHandler.getRandomSession(false);
                             future.channel().writeAndFlush(MessageType.JOINSESSION.create()
                                     .setId(s.getSessionId())
@@ -114,8 +100,7 @@ public class SinglePoint
                 });
     }
 
-    public Future<Void> start()
-    {
+    public Future<Void> start() {
         Promise<Void> result = GlobalEventExecutor.INSTANCE.newPromise();
         GlobalEventExecutor.INSTANCE.execute(() -> {
             PromiseCombiner combiner = new PromiseCombiner(GlobalEventExecutor.INSTANCE);
@@ -126,39 +111,23 @@ public class SinglePoint
             if (future.isSuccess())
                 Optional.ofNullable(scheduledMaintainTask.getAndSet(GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(() -> {
                     manager.getSessions().values().forEach(LinkSession::tick);
-                    for (LinkHandler linkHandler : linkHandlers)
-                    {
+                    for (LinkHandler linkHandler : linkHandlers) {
                         int[] old = new int[1];
                         if (linkHandler.getLinksCount().updateAndGet(i -> {
                             old[0] = i;
                             if (i < config.getNumLinksPerSession())
                                 i += 1;
                             return i;
-                        }) != old[0])
-                        {
-                            initiateNewLink(linkHandler).addListener(new ChannelFutureListener()
-                            {
+                        }) != old[0]) {
+                            initiateNewLink(linkHandler).addListener(new ChannelFutureListener() {
 
                                 @Override
-                                public void operationComplete(ChannelFuture future) throws Exception
-                                {
-                                    if (future.isSuccess())
-                                    {
+                                public void operationComplete(ChannelFuture future) throws Exception {
+                                    if (future.isSuccess()) {
                                         future.channel().closeFuture().addListener(closeFuture -> {
                                             linkHandler.getLinksCount().updateAndGet(decrementIfPositive);
-
-                                            future.channel().eventLoop().execute(() -> {
-                                                Throwable error = Vars.ChannelError.get(future.channel());
-                                                if (error != null)
-                                                {
-                                                    SimpleLogger.printStackTrace(error);
-                                                    SimpleLogger.println("%s > [%s] link %s closed with unexpected error. (%s)", Shared.printNow(), config.getName(), future.channel().id(), error);
-                                                }
-                                            });
                                         });
-                                    }
-                                    else
-                                    {
+                                    } else {
                                         linkHandler.getLinksCount().updateAndGet(decrementIfPositive);
                                     }
                                 }
@@ -172,23 +141,19 @@ public class SinglePoint
         });
     }
 
-    private ChannelFuture startTcpStreamService()
-    {
+    private ChannelFuture startTcpStreamService() {
         return new ServerBootstrap()
                 .group(Vars.WORKERS)
                 .channel(Shared.NettyObjects.classServerSocketChannel)
-                .childHandler(new ChannelInitializer<SocketChannel>()
-                {
+                .childHandler(new ChannelInitializer<SocketChannel>() {
 
                     @Override
-                    protected void initChannel(SocketChannel ch) throws Exception
-                    {
+                    protected void initChannel(SocketChannel ch) throws Exception {
                         ch.newSucceededFuture().addListener(manager.getResources().getChannelAccumulator());
 
                         RelayRequest request = manager.newTcpRelayRequest(ch.eventLoop());
                         if (!request.addListener(future -> {
-                            if (future.isSuccess())
-                            {
+                            if (future.isSuccess()) {
                                 RelayRequestResult result = (RelayRequestResult) future.get();
                                 StreamContext context = result.getSession().getStreams().compute(result.getStreamId(), (key, value) -> {
                                     if (value != null)
@@ -202,8 +167,7 @@ public class SinglePoint
                                 });
                                 ch.config().setAutoRead(true);
                             }
-                        }).isDone())
-                        {
+                        }).isDone()) {
                             ChannelFutureListener taskCancelRequest = future -> request.cancel(false);
                             ch.closeFuture().addListener(taskCancelRequest);
                             request.addListener(future -> ch.closeFuture().removeListener(taskCancelRequest));
@@ -222,17 +186,14 @@ public class SinglePoint
                 .addListener(manager.getResources().getChannelAccumulator());
     }
 
-    private ChannelFuture startUdpStreamService()
-    {
+    private ChannelFuture startUdpStreamService() {
         return new Bootstrap()
                 .group(Vars.WORKERS)
                 .channel(Shared.NettyObjects.classDatagramChannel)
-                .handler(new ChannelInitializer<DatagramChannel>()
-                {
+                .handler(new ChannelInitializer<DatagramChannel>() {
 
                     @Override
-                    protected void initChannel(DatagramChannel ch) throws Exception
-                    {
+                    protected void initChannel(DatagramChannel ch) throws Exception {
                         ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
                         ch.pipeline().addLast(udpStreamHandler);
                     }
@@ -243,8 +204,7 @@ public class SinglePoint
                 .addListener(manager.getResources().getChannelAccumulator());
     }
 
-    public Future<Void> stop()
-    {
+    public Future<Void> stop() {
         return channels.close().addListener(future -> {
             manager.getSessions().values().forEach(LinkSession::close);
             Optional.ofNullable(scheduledMaintainTask.getAndSet(null)).ifPresent(scheduled -> scheduled.cancel(false));
@@ -252,8 +212,7 @@ public class SinglePoint
     }
 
     @Override
-    public String toString()
-    {
+    public String toString() {
         return config.getName();
     }
 

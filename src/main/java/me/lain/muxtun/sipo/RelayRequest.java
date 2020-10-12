@@ -4,16 +4,13 @@ import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.ImmediateEventExecutor;
 
-class RelayRequest extends DefaultPromise<RelayRequestResult>
-{
+class RelayRequest extends DefaultPromise<RelayRequestResult> {
 
-    RelayRequest()
-    {
+    RelayRequest() {
         super(ImmediateEventExecutor.INSTANCE);
     }
 
-    RelayRequest(EventExecutor executor)
-    {
+    RelayRequest(EventExecutor executor) {
         super(executor);
     }
 

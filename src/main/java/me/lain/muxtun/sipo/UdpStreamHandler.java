@@ -1,8 +1,5 @@
 package me.lain.muxtun.sipo;
 
-import java.net.InetSocketAddress;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
@@ -11,53 +8,47 @@ import io.netty.channel.socket.DatagramPacket;
 import io.netty.util.ReferenceCountUtil;
 import me.lain.muxtun.codec.Message.MessageType;
 
+import java.net.InetSocketAddress;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 @Sharable
-class UdpStreamHandler extends ChannelInboundHandlerAdapter
-{
+class UdpStreamHandler extends ChannelInboundHandlerAdapter {
 
     private final LinkManager manager;
     private final Map<InetSocketAddress, StreamBridge> bridges;
 
-    UdpStreamHandler(LinkManager manager)
-    {
+    UdpStreamHandler(LinkManager manager) {
         this.manager = manager;
         this.bridges = new ConcurrentHashMap<>();
     }
 
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception
-    {
-        if (msg instanceof DatagramPacket)
-        {
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        if (msg instanceof DatagramPacket) {
             DatagramPacket cast = (DatagramPacket) msg;
 
-            try
-            {
+            try {
                 InetSocketAddress sender = cast.sender();
-                boolean[] created = new boolean[] { false };
+                boolean[] created = new boolean[]{false};
                 StreamBridge bridge = bridges.computeIfAbsent(sender, key -> {
                     created[0] = true;
                     return new StreamBridge(payload -> {
-                        try
-                        {
+                        try {
                             ctx.writeAndFlush(new DatagramPacket(payload.retain(), key));
-                        }
-                        finally
-                        {
+                        } finally {
                             ReferenceCountUtil.release(payload);
                         }
                     });
                 });
 
-                if (created[0])
-                {
+                if (created[0]) {
                     bridge.newSucceededFuture().addListener(manager.getResources().getChannelAccumulator());
                     bridge.closeFuture().addListener(future -> bridges.remove(sender, bridge));
 
                     RelayRequest request = manager.newUdpRelayRequest(ctx.channel().eventLoop());
                     if (!request.addListener(future -> {
-                        if (future.isSuccess())
-                        {
+                        if (future.isSuccess()) {
                             RelayRequestResult result = (RelayRequestResult) future.get();
                             StreamContext context = result.getSession().getStreams().compute(result.getStreamId(), (key, value) -> {
                                 if (value != null)
@@ -71,8 +62,7 @@ class UdpStreamHandler extends ChannelInboundHandlerAdapter
                             });
                             bridge.config().setAutoRead(true);
                         }
-                    }).isDone())
-                    {
+                    }).isDone()) {
                         ChannelFutureListener taskCancelRequest = future -> request.cancel(false);
                         bridge.closeFuture().addListener(taskCancelRequest);
                         request.addListener(future -> bridge.closeFuture().removeListener(taskCancelRequest));
@@ -80,21 +70,17 @@ class UdpStreamHandler extends ChannelInboundHandlerAdapter
                 }
 
                 bridge.accept(cast.content().retain());
-            }
-            finally
-            {
+            } finally {
                 ReferenceCountUtil.release(cast);
             }
-        }
-        else
-        {
+        } else {
             ctx.fireChannelRead(msg);
         }
     }
 
     @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception
-    {
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+//        ctx.close().addListener(future -> SimpleLogger.println("%s > udp stream connection %s closed with unexpected error. (%s)", Shared.printNow(), ctx.channel().id(), cause));
     }
 
 }
