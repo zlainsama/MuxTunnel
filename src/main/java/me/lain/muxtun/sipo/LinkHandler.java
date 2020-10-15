@@ -41,7 +41,7 @@ class LinkHandler extends ChannelDuplexHandler {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        ctx.close().addListener(future -> SimpleLogger.println("%s > link connection %s closed with unexpected error. (%s)", Shared.printNow(), ctx.channel().id(), cause));
+        ctx.close().addListener(future -> SimpleLogger.println("%s > link connection %s closed with unexpected error. (%s)", Shared.printNow(), ctx.channel(), cause));
     }
 
     AtomicInteger getLinksCount() {

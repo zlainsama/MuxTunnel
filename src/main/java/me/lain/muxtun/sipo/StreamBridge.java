@@ -42,7 +42,7 @@ class StreamBridge extends EmbeddedChannel implements Consumer<ByteBuf> {
 
             @Override
             public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-                ctx.close().addListener(future -> SimpleLogger.println("%s > stream bridge %s closed with unexpected error. (%s)", Shared.printNow(), ctx.channel().id(), cause));
+                ctx.close().addListener(future -> SimpleLogger.println("%s > stream bridge %s closed with unexpected error. (%s)", Shared.printNow(), ctx.channel(), cause));
             }
 
             private void handleMessage(StreamContext sctx, ByteBuf msg) throws Exception {
