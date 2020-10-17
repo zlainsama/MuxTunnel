@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 class LinkManager {
 
-    static final Comparator<LinkSession> SORTER = Comparator.comparingInt(session -> session.getStreams().size() * 16 - session.getFlowControl().window());
+    static final Comparator<LinkSession> SORTER = Comparator.comparingInt(session -> session.getStreams().size() * 64 - session.getFlowControl().window());
 
     private final SharedResources resources;
     private final Map<UUID, LinkSession> sessions;
@@ -47,7 +47,7 @@ class LinkManager {
         if (!getTcpRelayRequests().offer(request))
             request.tryFailure(new IllegalStateException());
         else if (!request.isDone())
-            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAM.create()));
+            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).limit(2L).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAM.create()));
         return request;
     }
 
@@ -56,7 +56,7 @@ class LinkManager {
         if (!getUdpRelayRequests().offer(request))
             request.tryFailure(new IllegalStateException());
         else if (!request.isDone())
-            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAMUDP.create()));
+            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).limit(2L).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAMUDP.create()));
         return request;
     }
 

@@ -84,7 +84,7 @@ class LinkHandler extends ChannelDuplexHandler {
                                         boolean[] created = new boolean[]{false};
                                         LinkSession session = lctx.getManager().getSessions().computeIfAbsent(sessionId, key -> {
                                             created[0] = true;
-                                            return new LinkSession(key, lctx.getManager(), Vars.WORKERS.next());
+                                            return new LinkSession(key, lctx.getManager(), lctx.getExecutor());
                                         });
                                         if (session.join(lctx.getChannel())) {
                                             lctx.setSession(session);
