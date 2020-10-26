@@ -47,7 +47,7 @@ class LinkSession {
         this.pendingMessages = new ConcurrentLinkedDeque<>();
         this.members = new DefaultChannelGroup("SessionMembers", executor);
         this.streams = new ConcurrentHashMap<>();
-        this.closedStreams = Collections.newSetFromMap(new ConcurrentHashMap<UUID, Boolean>());
+        this.closedStreams = Collections.newSetFromMap(new ConcurrentHashMap<>());
         this.timeoutCounter = new AtomicInteger();
     }
 
@@ -440,7 +440,7 @@ class LinkSession {
                 close();
         } else {
             getTimeoutCounter().set(0);
-            members.stream().map(LinkContext::getContext).forEach(LinkContext::tick);
+            members.forEach(link -> LinkContext.getContext(link).tick());
         }
     }
 

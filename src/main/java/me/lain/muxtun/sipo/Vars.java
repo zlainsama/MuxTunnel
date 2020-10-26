@@ -3,6 +3,7 @@ package me.lain.muxtun.sipo;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.EventLoopGroup;
 import io.netty.util.AttributeKey;
+import io.netty.util.concurrent.EventExecutorGroup;
 import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.Message;
 
@@ -11,7 +12,8 @@ class Vars {
     static final AttributeKey<LinkContext> LINKCONTEXT_KEY = AttributeKey.valueOf("me.lain.muxtun.sipo.Vars#LinkContext");
     static final AttributeKey<StreamContext> STREAMCONTEXT_KEY = AttributeKey.valueOf("me.lain.muxtun.sipo.Vars#StreamContext");
 
-    static final EventLoopGroup WORKERS = Shared.NettyObjects.getOrCreateEventLoopGroup("workersGroup", Math.max(4, Math.min(Runtime.getRuntime().availableProcessors() * 2, Short.MAX_VALUE)));
+    static final EventLoopGroup WORKERS = Shared.NettyObjects.getOrCreateEventLoopGroup("workersGroup", Math.max(4, Math.min(Runtime.getRuntime().availableProcessors(), Short.MAX_VALUE)));
+    static final EventExecutorGroup SESSIONS = Shared.NettyObjects.getOrCreateEventExecutorGroup("sessionsGroup", Math.max(4, Math.min(Runtime.getRuntime().availableProcessors(), Short.MAX_VALUE)));
 
     static final Message PLACEHOLDER = new Message() {
 
