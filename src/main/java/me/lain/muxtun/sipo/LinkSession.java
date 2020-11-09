@@ -436,7 +436,7 @@ class LinkSession {
         Set<Channel> members = getMembers();
 
         if (members.isEmpty()) {
-            if (getTimeoutCounter().incrementAndGet() > 30)
+            if (getTimeoutCounter().incrementAndGet() > 60)
                 close();
         } else {
             getTimeoutCounter().set(0);

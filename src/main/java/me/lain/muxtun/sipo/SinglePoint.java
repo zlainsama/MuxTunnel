@@ -8,7 +8,6 @@ import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.flush.FlushConsolidationHandler;
 import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
@@ -72,7 +71,6 @@ public class SinglePoint {
 
                         });
                         ch.pipeline().addLast(new WriteTimeoutHandler(30));
-                        ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
                         ch.pipeline().addLast(config.getProxySupplier().get());
                         ch.pipeline().addLast(config.getSslCtx().newHandler(ch.alloc()));
                         ch.pipeline().addLast(new MessageCodec());
@@ -173,7 +171,6 @@ public class SinglePoint {
                             request.addListener(future -> ch.closeFuture().removeListener(taskCancelRequest));
                         }
 
-                        ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
                         ch.pipeline().addLast(tcpStreamHandler);
                     }
 
@@ -194,7 +191,6 @@ public class SinglePoint {
 
                     @Override
                     protected void initChannel(DatagramChannel ch) throws Exception {
-                        ch.pipeline().addLast(new FlushConsolidationHandler(64, true));
                         ch.pipeline().addLast(udpStreamHandler);
                     }
 
