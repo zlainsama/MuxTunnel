@@ -98,8 +98,8 @@ public class App {
                     getConfig(profile).pathCert = FileSystems.getDefault().getPath(value);
                 } else if ("pathKey".equals(name)) {
                     getConfig(profile).pathKey = FileSystems.getDefault().getPath(value);
-                } else if ("trustSha1".equals(name)) {
-                    getConfig(profile).trustSha1.add(value);
+                } else if ("trustSha256".equals(name)) {
+                    getConfig(profile).trustSha256.add(value);
                 } else if ("ciphers".equals(name)) {
                     getConfig(profile).ciphers.addAll(Arrays.asList(value.split(":")));
                 } else if ("protocols".equals(name)) {
@@ -137,8 +137,8 @@ public class App {
                     SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "pathKey");
                     failed = true;
                 }
-                if (config.trustSha1.isEmpty()) {
-                    SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "trustSha1");
+                if (config.trustSha256.isEmpty()) {
+                    SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "trustSha256");
                     failed = true;
                 }
                 if (config.targetAddress == null) {
@@ -164,7 +164,7 @@ public class App {
             }
 
             for (SinglePointTempConfig config : configs.values())
-                config.sslCtx = SinglePointConfig.buildContext(config.pathCert, config.pathKey, config.trustSha1, config.ciphers, config.protocols);
+                config.sslCtx = SinglePointConfig.buildContext(config.pathCert, config.pathKey, config.trustSha256, config.ciphers, config.protocols);
         }
 
         SimpleLogger.println("%s > Starting...", Shared.printNow());
@@ -208,7 +208,7 @@ public class App {
         public List<Supplier<ProxyHandler>> proxySuppliers = new ArrayList<>();
         public Path pathCert = null;
         public Path pathKey = null;
-        public List<String> trustSha1 = new ArrayList<>();
+        public List<String> trustSha256 = new ArrayList<>();
         public List<String> ciphers = new ArrayList<>();
         public List<String> protocols = new ArrayList<>();
         public UUID targetAddress = null;
