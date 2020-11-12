@@ -16,13 +16,15 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public class App {
 
+    private static final List<SinglePoint> points = new ArrayList<>();
+
     private static Map<String, SinglePointTempConfig> configs = new HashMap<>();
-    private static List<SinglePoint> points = new ArrayList<>();
     private static String profile = "SinglePoint";
 
     private static void discardOut() {
@@ -168,8 +170,14 @@ public class App {
         }
 
         SimpleLogger.println("%s > Starting...", Shared.printNow());
-        points.addAll(configs.values().stream().map(SinglePointTempConfig::finish).map(SinglePoint::new).collect(Collectors.toList()));
-        points.stream().map(SinglePoint::start).collect(Collectors.toList()).forEach(Future::syncUninterruptibly);
+        while (true) {
+            points.addAll(configs.values().stream().map(SinglePointTempConfig::finish).map(SinglePoint::new).collect(Collectors.toList()));
+            if (Shared.combineFutures(points.stream().map(SinglePoint::start).collect(Collectors.toList())).awaitUninterruptibly(60L, TimeUnit.SECONDS))
+                break;
+            Shared.combineFutures(points.stream().map(SinglePoint::stop).collect(Collectors.toList())).awaitUninterruptibly(60L, TimeUnit.SECONDS);
+            points.clear();
+            Shared.sleep(5000L);
+        }
         SimpleLogger.println("%s > Done. %s", Shared.printNow(), points.toString());
 
         configs = null;
@@ -183,7 +191,7 @@ public class App {
                 List<Future<?>> futures = new ArrayList<>();
                 futures.addAll(Shared.NettyObjects.shutdownGracefully());
                 futures.addAll(points.stream().map(SinglePoint::stop).collect(Collectors.toList()));
-                futures.forEach(Future::syncUninterruptibly);
+                Shared.combineFutures(futures).awaitUninterruptibly(60L, TimeUnit.SECONDS);
                 SimpleLogger.println("%s > Done.", Shared.printNow());
                 Shared.sleep(100L);
             }

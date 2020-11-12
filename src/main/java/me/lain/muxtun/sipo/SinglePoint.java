@@ -14,12 +14,11 @@ import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GlobalEventExecutor;
-import io.netty.util.concurrent.Promise;
-import io.netty.util.concurrent.PromiseCombiner;
 import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.codec.MessageCodec;
 
+import java.util.Arrays;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -99,13 +98,7 @@ public class SinglePoint {
     }
 
     public Future<Void> start() {
-        Promise<Void> result = GlobalEventExecutor.INSTANCE.newPromise();
-        GlobalEventExecutor.INSTANCE.execute(() -> {
-            PromiseCombiner combiner = new PromiseCombiner(GlobalEventExecutor.INSTANCE);
-            combiner.addAll(startTcpStreamService(), startUdpStreamService());
-            combiner.finish(result);
-        });
-        return result.addListener(future -> {
+        return Shared.combineFutures(Arrays.asList(startTcpStreamService(), startUdpStreamService())).addListener(future -> {
             if (future.isSuccess())
                 Optional.ofNullable(scheduledMaintainTask.getAndSet(GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(() -> {
                     manager.getSessions().values().forEach(LinkSession::tick);

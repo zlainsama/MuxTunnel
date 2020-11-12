@@ -6,6 +6,7 @@ import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.util.IllegalReferenceCountException;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.ScheduledFuture;
 import me.lain.muxtun.codec.Message;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.util.FlowControl;
@@ -319,7 +320,11 @@ class LinkSession {
 
                         RelayRequestResult result = new RelayRequestResult(this, streamId);
                         if (request == null || request.isDone() || !request.trySuccess(result)) {
-                            writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId));
+                            Runnable dropStream = () -> writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId));
+                            ScheduledFuture<?> scheduledDrop = getExecutor().schedule(dropStream, 2L, TimeUnit.SECONDS);
+
+                            if (!getManager().getTcpPendingOpenDrops().offer(new PendingOpenDrop(result, dropStream, scheduledDrop)) && scheduledDrop.cancel(false))
+                                dropStream.run();
                         }
                     }
                 } else if (!getManager().getTcpRelayRequests().isEmpty()) {
@@ -345,7 +350,11 @@ class LinkSession {
 
                         RelayRequestResult result = new RelayRequestResult(this, streamId);
                         if (request == null || request.isDone() || !request.trySuccess(result)) {
-                            writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId));
+                            Runnable dropStream = () -> writeAndFlush(MessageType.CLOSESTREAM.create().setId(streamId));
+                            ScheduledFuture<?> scheduledDrop = getExecutor().schedule(dropStream, 2L, TimeUnit.SECONDS);
+
+                            if (!getManager().getUdpPendingOpenDrops().offer(new PendingOpenDrop(result, dropStream, scheduledDrop)) && scheduledDrop.cancel(false))
+                                dropStream.run();
                         }
                     }
                 } else if (!getManager().getUdpRelayRequests().isEmpty()) {
