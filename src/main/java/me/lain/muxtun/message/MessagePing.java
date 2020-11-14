@@ -5,7 +5,7 @@ import me.lain.muxtun.codec.Message;
 
 public class MessagePing implements Message {
 
-    private static MessagePing INSTANCE = new MessagePing();
+    private static final MessagePing INSTANCE = new MessagePing();
 
     private MessagePing() {
     }
