@@ -17,6 +17,7 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.codec.MessageCodec;
+import me.lain.muxtun.util.SharedPool;
 
 import java.util.Arrays;
 import java.util.Optional;
@@ -71,7 +72,7 @@ public class SinglePoint {
                         });
                         ch.pipeline().addLast(new WriteTimeoutHandler(30));
                         ch.pipeline().addLast(config.getProxySupplier().get());
-                        ch.pipeline().addLast(config.getSslCtx().newHandler(ch.alloc()));
+                        ch.pipeline().addLast(config.getSslCtx().newHandler(ch.alloc(), SharedPool.INSTANCE));
                         ch.pipeline().addLast(new MessageCodec());
                         ch.pipeline().addLast(linkHandler);
                     }

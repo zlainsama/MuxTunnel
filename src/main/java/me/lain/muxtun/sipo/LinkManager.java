@@ -70,7 +70,7 @@ class LinkManager {
         if (!getTcpRelayRequests().offer(request))
             request.tryFailure(new IllegalStateException());
         else if (!request.isDone())
-            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).limit(2L).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAM.create()));
+            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).limit(4L).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAM.create()));
         request.addListener(this::removeCancelledTcpRelayRequests);
         return request;
     }
@@ -90,7 +90,7 @@ class LinkManager {
         if (!getUdpRelayRequests().offer(request))
             request.tryFailure(new IllegalStateException());
         else if (!request.isDone())
-            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).limit(2L).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAMUDP.create()));
+            getSessions().values().stream().filter(LinkSession::isActive).sorted(SORTER).limit(4L).forEach(session -> session.writeAndFlush(MessageType.OPENSTREAMUDP.create()));
         request.addListener(this::removeCancelledUdpRelayRequests);
         return request;
     }
