@@ -9,6 +9,11 @@ import me.lain.muxtun.codec.Message;
 
 class Vars {
 
+    static final String HANDLERNAME_TLS = "TLS";
+    static final String HANDLERNAME_CODEC = "Codec";
+    static final String HANDLERNAME_HANDLER = "Handler";
+    static final String HANDLERNAME_LIMITER = "Limiter";
+
     static final AttributeKey<LinkContext> LINKCONTEXT_KEY = AttributeKey.valueOf("me.lain.muxtun.sipo.Vars#LinkContext");
     static final AttributeKey<StreamContext> STREAMCONTEXT_KEY = AttributeKey.valueOf("me.lain.muxtun.sipo.Vars#StreamContext");
 

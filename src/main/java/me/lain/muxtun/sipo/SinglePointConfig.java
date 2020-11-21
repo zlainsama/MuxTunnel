@@ -1,6 +1,5 @@
 package me.lain.muxtun.sipo;
 
-import io.netty.handler.proxy.ProxyHandler;
 import io.netty.handler.ssl.ClientAuth;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
@@ -15,44 +14,40 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 public class SinglePointConfig {
 
-    public static final int DEFAULT_NUMLINKSPERSESSION = 4;
     public static final int DEFAULT_NUMSESSIONS = 1;
     public static final int DEFAULT_MAXCLF = 8;
 
     private final SocketAddress bindAddress;
     private final SocketAddress remoteAddress;
-    private final Supplier<ProxyHandler> proxySupplier;
+    private final LinkConfig[] linkConfigs;
     private final SslContext sslCtx;
     private final UUID targetAddress;
-    private final int numLinksPerSession;
     private final int numSessions;
     private final int maxCLF;
     private final String name;
 
-    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, Supplier<ProxyHandler> proxySupplier, SslContext sslCtx, UUID targetAddress) {
-        this(bindAddress, remoteAddress, proxySupplier, sslCtx, targetAddress, DEFAULT_NUMLINKSPERSESSION, DEFAULT_NUMSESSIONS, DEFAULT_MAXCLF);
+    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, LinkConfig[] linkConfigs, SslContext sslCtx, UUID targetAddress) {
+        this(bindAddress, remoteAddress, linkConfigs, sslCtx, targetAddress, DEFAULT_NUMSESSIONS, DEFAULT_MAXCLF);
     }
 
-    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, Supplier<ProxyHandler> proxySupplier, SslContext sslCtx, UUID targetAddress, int numLinksPerSession, int numSessions, int maxCLF) {
-        this(bindAddress, remoteAddress, proxySupplier, sslCtx, targetAddress, numLinksPerSession, numSessions, maxCLF, "SinglePoint");
+    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, LinkConfig[] linkConfigs, SslContext sslCtx, UUID targetAddress, int numSessions, int maxCLF) {
+        this(bindAddress, remoteAddress, linkConfigs, sslCtx, targetAddress, numSessions, maxCLF, "SinglePoint");
     }
 
-    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, Supplier<ProxyHandler> proxySupplier, SslContext sslCtx, UUID targetAddress, int numLinksPerSession, int numSessions, int maxCLF, String name) {
-        if (bindAddress == null || remoteAddress == null || proxySupplier == null || sslCtx == null || targetAddress == null || name == null)
+    public SinglePointConfig(SocketAddress bindAddress, SocketAddress remoteAddress, LinkConfig[] linkConfigs, SslContext sslCtx, UUID targetAddress, int numSessions, int maxCLF, String name) {
+        if (bindAddress == null || remoteAddress == null || linkConfigs == null || sslCtx == null || targetAddress == null || name == null)
             throw new NullPointerException();
-        if (!sslCtx.isClient() || numLinksPerSession < 1 || numSessions < 1 || maxCLF < 0 || name.isEmpty())
+        if (linkConfigs.length == 0 || !sslCtx.isClient() || numSessions < 1 || maxCLF < 0 || name.isEmpty())
             throw new IllegalArgumentException();
 
         this.bindAddress = bindAddress;
         this.remoteAddress = remoteAddress;
-        this.proxySupplier = proxySupplier;
+        this.linkConfigs = linkConfigs;
         this.sslCtx = sslCtx;
         this.targetAddress = targetAddress;
-        this.numLinksPerSession = numLinksPerSession;
         this.numSessions = numSessions;
         this.maxCLF = maxCLF;
         this.name = name;
@@ -79,16 +74,12 @@ public class SinglePointConfig {
         return name;
     }
 
-    public int getNumLinksPerSession() {
-        return numLinksPerSession;
-    }
-
     public int getNumSessions() {
         return numSessions;
     }
 
-    public Supplier<ProxyHandler> getProxySupplier() {
-        return proxySupplier;
+    public LinkConfig[] getLinkConfigs() {
+        return linkConfigs;
     }
 
     public SocketAddress getRemoteAddress() {

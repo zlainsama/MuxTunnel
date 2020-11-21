@@ -1,9 +1,9 @@
 package me.lain.muxtun;
 
 import io.netty.handler.proxy.ProxyHandler;
-import io.netty.handler.proxy.Socks5ProxyHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.util.concurrent.Future;
+import me.lain.muxtun.sipo.LinkConfig;
 import me.lain.muxtun.sipo.SinglePoint;
 import me.lain.muxtun.sipo.SinglePointConfig;
 import me.lain.muxtun.util.SimpleLogger;
@@ -90,12 +90,20 @@ public class App {
                     String host = value.substring(0, i1);
                     int port = Integer.parseInt(value.substring(i1 + 1));
                     getConfig(profile).remoteAddress = new InetSocketAddress(host, port);
-                } else if ("socks5Proxy".equals(name)) {
-                    int i1 = value.lastIndexOf(":");
-                    String host = value.substring(0, i1);
-                    int port = Integer.parseInt(value.substring(i1 + 1));
+                } else if ("linkPath".equals(name)) {
+                    int i1 = value.indexOf("@");
+                    String configString = value.substring(0, i1);
+                    String addressString = value.substring(i1 + 1);
+                    int i2 = configString.indexOf(":");
+                    short priority = Short.parseShort(configString.substring(0, i2));
+                    long writeLimit = Long.parseLong(configString.substring(i2 + 1));
+                    int i3 = addressString.lastIndexOf(":");
+                    String host = addressString.substring(0, i3);
+                    int port = Integer.parseInt(addressString.substring(i3 + 1));
                     SocketAddress proxyAddress = new InetSocketAddress(host, port);
-                    getConfig(profile).proxySuppliers.add(() -> new Socks5ProxyHandler(proxyAddress));
+                    Supplier<ProxyHandler> proxySupplier = new LinkConfig.SimpleSocks5ProxyHandlerSupplier(proxyAddress);
+                    LinkConfig linkConfig = new LinkConfig(proxySupplier, priority, writeLimit);
+                    getConfig(profile).linkConfigs.add(linkConfig);
                 } else if ("pathCert".equals(name)) {
                     getConfig(profile).pathCert = FileSystems.getDefault().getPath(value);
                 } else if ("pathKey".equals(name)) {
@@ -108,8 +116,6 @@ public class App {
                     getConfig(profile).protocols.addAll(Arrays.asList(value.split(":")));
                 } else if ("targetAddress".equals(name)) {
                     getConfig(profile).targetAddress = UUID.fromString(value);
-                } else if ("numLinksPerSession".equals(name)) {
-                    getConfig(profile).numLinksPerSession = Integer.parseInt(value);
                 } else if ("numSessions".equals(name)) {
                     getConfig(profile).numSessions = Integer.parseInt(value);
                 } else if ("maxCLF".equals(name)) {
@@ -127,8 +133,8 @@ public class App {
                     SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "remoteAddress");
                     failed = true;
                 }
-                if (config.proxySuppliers.isEmpty()) {
-                    SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "proxyAddress(socks5Proxy)");
+                if (config.linkConfigs.isEmpty()) {
+                    SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "linkPath");
                     failed = true;
                 }
                 if (config.pathCert == null) {
@@ -145,10 +151,6 @@ public class App {
                 }
                 if (config.targetAddress == null) {
                     SimpleLogger.println("%s > [%s] Missing %s", Shared.printNow(), config.name, "targetAddress");
-                    failed = true;
-                }
-                if (config.numLinksPerSession < 1) {
-                    SimpleLogger.println("%s > [%s] Invalid %s", Shared.printNow(), config.name, "numLinksPerSession");
                     failed = true;
                 }
                 if (config.numSessions < 1) {
@@ -213,14 +215,13 @@ public class App {
 
         public SocketAddress bindAddress = null;
         public SocketAddress remoteAddress = null;
-        public List<Supplier<ProxyHandler>> proxySuppliers = new ArrayList<>();
+        public List<LinkConfig> linkConfigs = new ArrayList<>();
         public Path pathCert = null;
         public Path pathKey = null;
         public List<String> trustSha256 = new ArrayList<>();
         public List<String> ciphers = new ArrayList<>();
         public List<String> protocols = new ArrayList<>();
         public UUID targetAddress = null;
-        public int numLinksPerSession = SinglePointConfig.DEFAULT_NUMLINKSPERSESSION;
         public int numSessions = SinglePointConfig.DEFAULT_NUMSESSIONS;
         public int maxCLF = SinglePointConfig.DEFAULT_MAXCLF;
         public SslContext sslCtx = null;
@@ -233,10 +234,9 @@ public class App {
             return new SinglePointConfig(
                     bindAddress,
                     remoteAddress,
-                    Shared.RoundRobinSupplier.of(proxySuppliers),
+                    linkConfigs.toArray(new LinkConfig[0]),
                     sslCtx,
                     targetAddress,
-                    numLinksPerSession,
                     numSessions,
                     maxCLF,
                     name);

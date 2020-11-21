@@ -1,18 +1,19 @@
 package me.lain.muxtun.sipo;
 
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelDuplexHandler;
+import io.netty.channel.*;
 import io.netty.channel.ChannelHandler.Sharable;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelPromise;
+import io.netty.handler.traffic.ChannelTrafficShapingHandler;
 import io.netty.util.ReferenceCountUtil;
 import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.Message;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.util.SimpleLogger;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
@@ -22,7 +23,7 @@ class LinkHandler extends ChannelDuplexHandler {
 
     private final AtomicReference<RandomSession> RS = new AtomicReference<>();
     private final AtomicInteger failCount = new AtomicInteger();
-    private final AtomicInteger linksCount = new AtomicInteger();
+    private final Map<Integer, Optional<Channel>> channelMap = new ConcurrentHashMap<>();
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
@@ -44,8 +45,8 @@ class LinkHandler extends ChannelDuplexHandler {
         ctx.close().addListener(future -> SimpleLogger.println("%s > link connection %s closed with unexpected error. (%s)", Shared.printNow(), ctx.channel(), cause));
     }
 
-    AtomicInteger getLinksCount() {
-        return linksCount;
+    Map<Integer, Optional<Channel>> getChannelMap() {
+        return channelMap;
     }
 
     RandomSession getRandomSession(boolean refresh) {
@@ -89,6 +90,13 @@ class LinkHandler extends ChannelDuplexHandler {
                                         if (session.join(lctx.getChannel())) {
                                             lctx.setSession(session);
 
+                                            LinkConfig linkConfig = lctx.getLinkConfig();
+                                            short priority = linkConfig.getPriority();
+                                            long writeLimit = linkConfig.getWriteLimit();
+                                            lctx.getPriority().set(priority);
+                                            lctx.getChannel().pipeline().addBefore(Vars.HANDLERNAME_TLS, Vars.HANDLERNAME_LIMITER, new ChannelTrafficShapingHandler(writeLimit, 0L));
+                                            lctx.writeAndFlush(MessageType.LINKCONFIG.create().setPriority(priority).setWriteLimit(writeLimit));
+
                                             if (created[0]) {
                                                 IntStream.range(0, lctx.getManager().getTcpRelayRequests().size()).forEach(i -> session.writeAndFlush(MessageType.OPENSTREAM.create()));
                                                 IntStream.range(0, lctx.getManager().getUdpRelayRequests().size()).forEach(i -> session.writeAndFlush(MessageType.OPENSTREAMUDP.create()));
@@ -110,48 +118,9 @@ class LinkHandler extends ChannelDuplexHandler {
                     }
                     break;
                 }
-                case OPENSTREAM: {
-                    if (lctx.getSession() != null) {
-                        LinkSession session = lctx.getSession();
-                        int seq = msg.getSeq();
-
-                        boolean inRange;
-                        if (inRange = session.getFlowControl().inRange(seq))
-                            session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(inRange ? seq : ack - 1)));
-                    } else {
-                        lctx.close();
-                    }
-                    break;
-                }
-                case OPENSTREAMUDP: {
-                    if (lctx.getSession() != null) {
-                        LinkSession session = lctx.getSession();
-                        int seq = msg.getSeq();
-
-                        boolean inRange;
-                        if (inRange = session.getFlowControl().inRange(seq))
-                            session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(inRange ? seq : ack - 1)));
-                    } else {
-                        lctx.close();
-                    }
-                    break;
-                }
-                case CLOSESTREAM: {
-                    if (lctx.getSession() != null) {
-                        LinkSession session = lctx.getSession();
-                        int seq = msg.getSeq();
-
-                        boolean inRange;
-                        if (inRange = session.getFlowControl().inRange(seq))
-                            session.getInboundBuffer().computeIfAbsent(seq, key -> ReferenceCountUtil.retain(msg));
-                        session.updateReceived(ack -> lctx.writeAndFlush(MessageType.ACKNOWLEDGE.create().setAck(ack).setSAck(inRange ? seq : ack - 1)));
-                    } else {
-                        lctx.close();
-                    }
-                    break;
-                }
+                case OPENSTREAM:
+                case OPENSTREAMUDP:
+                case CLOSESTREAM:
                 case DATASTREAM: {
                     if (lctx.getSession() != null) {
                         LinkSession session = lctx.getSession();
@@ -179,6 +148,28 @@ class LinkHandler extends ChannelDuplexHandler {
                     }
                     break;
                 }
+                case LINKCONFIG: {
+                    if (lctx.getSession() != null) {
+                        short priority = msg.getPriority();
+                        long writeLimit = msg.getWriteLimit();
+                        ChannelPipeline p = lctx.getChannel().pipeline();
+
+                        lctx.getPriority().set(priority);
+                        if (writeLimit > 0L) {
+                            ChannelTrafficShapingHandler limiter = new ChannelTrafficShapingHandler(writeLimit, 0L);
+                            if (p.get(Vars.HANDLERNAME_LIMITER) != null) {
+                                p.replace(Vars.HANDLERNAME_LIMITER, Vars.HANDLERNAME_LIMITER, limiter);
+                            } else {
+                                p.addBefore(Vars.HANDLERNAME_TLS, Vars.HANDLERNAME_LIMITER, limiter);
+                            }
+                        } else if (p.get(Vars.HANDLERNAME_LIMITER) != null) {
+                            p.remove(Vars.HANDLERNAME_LIMITER);
+                        }
+                    } else {
+                        lctx.close();
+                    }
+                    break;
+                }
                 default: {
                     lctx.close();
                     break;
@@ -192,14 +183,16 @@ class LinkHandler extends ChannelDuplexHandler {
             case OPENSTREAM:
             case OPENSTREAMUDP:
             case CLOSESTREAM:
-            case DATASTREAM:
+            case DATASTREAM: {
                 promise.addListener(future -> {
                     if (future.isSuccess())
                         lctx.getRTTM().initiate();
                 });
                 break;
-            default:
+            }
+            default: {
                 break;
+            }
         }
     }
 

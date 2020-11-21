@@ -51,7 +51,7 @@ public class SinglePoint {
         this.scheduledMaintainTask = new AtomicReference<>();
     }
 
-    private ChannelFuture initiateNewLink(LinkHandler linkHandler) {
+    private ChannelFuture initiateNewLink(LinkHandler linkHandler, LinkConfig linkConfig, int index) {
         return new Bootstrap()
                 .group(Vars.WORKERS)
                 .channel(Shared.NettyObjects.classSocketChannel)
@@ -59,7 +59,7 @@ public class SinglePoint {
 
                     @Override
                     protected void initChannel(SocketChannel ch) throws Exception {
-                        ch.attr(Vars.LINKCONTEXT_KEY).set(new LinkContext(manager, ch));
+                        ch.attr(Vars.LINKCONTEXT_KEY).set(new LinkContext(manager, ch, linkConfig));
 
                         ch.pipeline().addLast(new IdleStateHandler(0, 0, 60) {
 
@@ -71,10 +71,10 @@ public class SinglePoint {
 
                         });
                         ch.pipeline().addLast(new WriteTimeoutHandler(30));
-                        ch.pipeline().addLast(config.getProxySupplier().get());
-                        ch.pipeline().addLast(config.getSslCtx().newHandler(ch.alloc(), SharedPool.INSTANCE));
-                        ch.pipeline().addLast(new MessageCodec());
-                        ch.pipeline().addLast(linkHandler);
+                        ch.pipeline().addLast(linkConfig.getProxySupplier().get());
+                        ch.pipeline().addLast(Vars.HANDLERNAME_TLS, config.getSslCtx().newHandler(ch.alloc(), SharedPool.INSTANCE));
+                        ch.pipeline().addLast(Vars.HANDLERNAME_CODEC, new MessageCodec());
+                        ch.pipeline().addLast(Vars.HANDLERNAME_HANDLER, linkHandler);
                     }
 
                 })
@@ -82,19 +82,29 @@ public class SinglePoint {
                 .option(ChannelOption.TCP_NODELAY, true)
                 .connect(config.getRemoteAddress())
                 .addListener(manager.getResources().getChannelAccumulator())
-                .addListener(new ChannelFutureListener() {
-
-                    @Override
-                    public void operationComplete(ChannelFuture future) throws Exception {
-                        if (future.isSuccess()) {
+                .addListener((ChannelFutureListener) future -> {
+                    Channel channel = future.channel();
+                    if (future.isSuccess()) {
+                        Optional<Channel> storedValue = Optional.of(channel);
+                        if (linkHandler.getChannelMap().compute(index, (k, v) -> {
+                            if (v == null || !v.isPresent())
+                                return storedValue;
+                            return v;
+                        }).get() == channel) {
+                            channel.closeFuture().addListener(closeFuture -> {
+                                linkHandler.getChannelMap().remove(index, storedValue);
+                            });
                             RandomSession s = linkHandler.getRandomSession(false);
-                            future.channel().writeAndFlush(MessageType.JOINSESSION.create()
+                            channel.writeAndFlush(MessageType.JOINSESSION.create()
                                     .setId(s.getSessionId())
                                     .setId2(manager.getResources().getTargetAddress())
                                     .setBuf(Unpooled.wrappedBuffer(s.getChallenge())));
+                        } else {
+                            channel.close();
                         }
+                    } else {
+                        linkHandler.getChannelMap().remove(index, Optional.empty());
                     }
-
                 });
     }
 
@@ -104,27 +114,28 @@ public class SinglePoint {
                 Optional.ofNullable(scheduledMaintainTask.getAndSet(GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(() -> {
                     manager.getSessions().values().forEach(LinkSession::tick);
                     for (LinkHandler linkHandler : linkHandlers) {
-                        int[] old = new int[1];
-                        if (linkHandler.getLinksCount().updateAndGet(i -> {
-                            old[0] = i;
-                            if (i < config.getNumLinksPerSession())
-                                i += 1;
-                            return i;
-                        }) != old[0]) {
-                            initiateNewLink(linkHandler).addListener(new ChannelFutureListener() {
-
-                                @Override
-                                public void operationComplete(ChannelFuture future) throws Exception {
-                                    if (future.isSuccess()) {
-                                        future.channel().closeFuture().addListener(closeFuture -> {
-                                            linkHandler.getLinksCount().updateAndGet(decrementIfPositive);
-                                        });
-                                    } else {
-                                        linkHandler.getLinksCount().updateAndGet(decrementIfPositive);
-                                    }
-                                }
-
-                            });
+                        LinkConfig[] linkConfigs = config.getLinkConfigs();
+                        int first = -1;
+                        for (int i = 0; i < linkConfigs.length; i++) {
+                            boolean[] computed = new boolean[]{false};
+                            if (!linkHandler.getChannelMap().computeIfAbsent(i, k -> {
+                                computed[0] = true;
+                                return Optional.empty();
+                            }).isPresent() && computed[0]) {
+                                initiateNewLink(linkHandler, linkConfigs[i], i);
+                                first = i;
+                                break;
+                            }
+                        }
+                        for (int i = linkConfigs.length - 1; i >= 0 && i > first; i--) {
+                            boolean[] computed = new boolean[]{false};
+                            if (!linkHandler.getChannelMap().computeIfAbsent(i, k -> {
+                                computed[0] = true;
+                                return Optional.empty();
+                            }).isPresent() && computed[0]) {
+                                initiateNewLink(linkHandler, linkConfigs[i], i);
+                                break;
+                            }
                         }
                     }
                 }, 1L, 1L, TimeUnit.SECONDS))).ifPresent(scheduled -> scheduled.cancel(false));
