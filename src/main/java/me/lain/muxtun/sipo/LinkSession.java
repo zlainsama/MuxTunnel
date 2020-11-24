@@ -68,17 +68,11 @@ class LinkSession {
 
             if (removed != null) {
                 try {
-                    switch (removed.type()) {
-                        case DATASTREAM: {
-                            StreamContext context = getStreams().get(removed.getId());
+                    if (removed.type() == MessageType.DATASTREAM) {
+                        StreamContext context = getStreams().get(removed.getId());
 
-                            if (context != null)
-                                context.updateQuota(i -> i + removed.getBuf().readableBytes());
-
-                            break;
-                        }
-                        default:
-                            break;
+                        if (context != null)
+                            context.updateQuota(i -> i + removed.getBuf().readableBytes());
                     }
                 } finally {
                     ReferenceCountUtil.release(removed);
@@ -92,7 +86,7 @@ class LinkSession {
         if (getExecutor().inEventLoop())
             close0();
         else
-            getExecutor().execute(() -> close0());
+            getExecutor().execute(this::close0);
     }
 
     private void close0() {
@@ -131,7 +125,7 @@ class LinkSession {
         if (getExecutor().inEventLoop())
             flush0();
         else
-            getExecutor().execute(() -> flush0());
+            getExecutor().execute(this::flush0);
     }
 
     private void flush0() {
@@ -437,7 +431,7 @@ class LinkSession {
             if (getExecutor().inEventLoop())
                 tick0();
             else
-                getExecutor().execute(() -> tick0());
+                getExecutor().execute(this::tick0);
         }
     }
 
@@ -508,10 +502,7 @@ class LinkSession {
                 return false;
 
             switch (msg.type()) {
-                case OPENSTREAM: {
-                    getPendingMessages().addFirst(ReferenceCountUtil.retain(msg));
-                    return true;
-                }
+                case OPENSTREAM:
                 case OPENSTREAMUDP: {
                     getPendingMessages().addFirst(ReferenceCountUtil.retain(msg));
                     return true;

@@ -17,18 +17,14 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.codec.MessageCodec;
-import me.lain.muxtun.util.SharedPool;
 
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
 public class SinglePoint {
-
-    private static final IntUnaryOperator decrementIfPositive = i -> i > 0 ? i - 1 : i;
 
     private final SinglePointConfig config;
     private final ChannelGroup channels;
@@ -72,7 +68,7 @@ public class SinglePoint {
                         });
                         ch.pipeline().addLast(new WriteTimeoutHandler(30));
                         ch.pipeline().addLast(linkConfig.getProxySupplier().get());
-                        ch.pipeline().addLast(Vars.HANDLERNAME_TLS, config.getSslCtx().newHandler(ch.alloc(), SharedPool.INSTANCE));
+                        ch.pipeline().addLast(Vars.HANDLERNAME_TLS, config.getSslCtx().newHandler(ch.alloc(), Vars.SHARED_POOL));
                         ch.pipeline().addLast(Vars.HANDLERNAME_CODEC, new MessageCodec());
                         ch.pipeline().addLast(Vars.HANDLERNAME_HANDLER, linkHandler);
                     }

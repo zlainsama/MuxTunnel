@@ -185,20 +185,15 @@ public class App {
         configs = null;
         profile = null;
 
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-
-            @Override
-            public void run() {
-                SimpleLogger.println("%s > Shutting down...", Shared.printNow());
-                List<Future<?>> futures = new ArrayList<>();
-                futures.addAll(Shared.NettyObjects.shutdownGracefully());
-                futures.addAll(points.stream().map(SinglePoint::stop).collect(Collectors.toList()));
-                Shared.combineFutures(futures).awaitUninterruptibly(60L, TimeUnit.SECONDS);
-                SimpleLogger.println("%s > Done.", Shared.printNow());
-                Shared.sleep(100L);
-            }
-
-        });
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            SimpleLogger.println("%s > Shutting down...", Shared.printNow());
+            List<Future<?>> futures = new ArrayList<>();
+            futures.addAll(Shared.NettyObjects.shutdownGracefully());
+            futures.addAll(points.stream().map(SinglePoint::stop).collect(Collectors.toList()));
+            Shared.combineFutures(futures).awaitUninterruptibly(60L, TimeUnit.SECONDS);
+            SimpleLogger.println("%s > Done.", Shared.printNow());
+            Shared.sleep(100L);
+        }));
     }
 
     private static boolean nonCommentLine(String line) {
