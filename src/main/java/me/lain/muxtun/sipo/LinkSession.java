@@ -184,7 +184,7 @@ class LinkSession {
                         }
                     }
 
-                    getExecutor().execute(new Runnable() {
+                    Runnable task = new Runnable() {
 
                         long lastRTO = 250L;
 
@@ -229,7 +229,12 @@ class LinkSession {
                             }
                         }
 
-                    });
+                    };
+
+                    if (getExecutor().inEventLoop())
+                        task.run();
+                    else
+                        getExecutor().execute(task);
 
                     return true;
                 }
