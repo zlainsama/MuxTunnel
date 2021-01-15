@@ -8,6 +8,7 @@ import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.ssl.SslContext;
 import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
@@ -17,8 +18,13 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.codec.MessageCodec;
+import me.lain.muxtun.sipo.config.LinkPath;
+import me.lain.muxtun.sipo.config.SinglePointConfig;
 
+import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -27,6 +33,7 @@ import java.util.stream.IntStream;
 public class SinglePoint {
 
     private final SinglePointConfig config;
+    private final SslContext sslCtx;
     private final ChannelGroup channels;
     private final LinkManager manager;
     private final LinkHandler[] linkHandlers;
@@ -34,8 +41,9 @@ public class SinglePoint {
     private final UdpStreamHandler udpStreamHandler;
     private final AtomicReference<Future<?>> scheduledMaintainTask;
 
-    public SinglePoint(SinglePointConfig config) {
-        this.config = config;
+    public SinglePoint(SinglePointConfig config) throws IOException {
+        this.config = Objects.requireNonNull(config, "config");
+        this.sslCtx = SinglePointConfig.buildContext(config.getPathCert(), config.getPathKey(), config.getTrusts(), config.getCiphers(), config.getProtocols());
         this.channels = new DefaultChannelGroup("SinglePoint", GlobalEventExecutor.INSTANCE, true);
         this.manager = new LinkManager(new SharedResources(future -> {
             if (future.isSuccess())
@@ -47,7 +55,7 @@ public class SinglePoint {
         this.scheduledMaintainTask = new AtomicReference<>();
     }
 
-    private ChannelFuture initiateNewLink(LinkHandler linkHandler, LinkConfig linkConfig, int index) {
+    private ChannelFuture initiateNewLink(LinkHandler linkHandler, LinkPath linkPath, int index) {
         return new Bootstrap()
                 .group(Vars.WORKERS)
                 .channel(Shared.NettyObjects.classSocketChannel)
@@ -55,7 +63,7 @@ public class SinglePoint {
 
                     @Override
                     protected void initChannel(SocketChannel ch) throws Exception {
-                        ch.attr(Vars.LINKCONTEXT_KEY).set(new LinkContext(manager, ch, linkConfig));
+                        ch.attr(Vars.LINKCONTEXT_KEY).set(new LinkContext(manager, ch, linkPath));
 
                         ch.pipeline().addLast(new IdleStateHandler(0, 0, 60) {
 
@@ -67,8 +75,8 @@ public class SinglePoint {
 
                         });
                         ch.pipeline().addLast(new WriteTimeoutHandler(30));
-                        ch.pipeline().addLast(linkConfig.getProxySupplier().get());
-                        ch.pipeline().addLast(Vars.HANDLERNAME_TLS, config.getSslCtx().newHandler(ch.alloc(), Vars.SHARED_POOL));
+                        ch.pipeline().addLast(linkPath.getProxySupplier().get());
+                        ch.pipeline().addLast(Vars.HANDLERNAME_TLS, sslCtx.newHandler(ch.alloc(), Vars.SHARED_POOL));
                         ch.pipeline().addLast(Vars.HANDLERNAME_CODEC, new MessageCodec());
                         ch.pipeline().addLast(Vars.HANDLERNAME_HANDLER, linkHandler);
                     }
@@ -110,26 +118,26 @@ public class SinglePoint {
                 Optional.ofNullable(scheduledMaintainTask.getAndSet(GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(() -> {
                     manager.getSessions().values().forEach(LinkSession::tick);
                     for (LinkHandler linkHandler : linkHandlers) {
-                        LinkConfig[] linkConfigs = config.getLinkConfigs();
+                        List<LinkPath> linkPaths = config.getLinkPaths();
                         int first = -1;
-                        for (int i = 0; i < linkConfigs.length; i++) {
+                        for (int i = 0; i < linkPaths.size(); i++) {
                             boolean[] computed = new boolean[]{false};
                             if (!linkHandler.getChannelMap().computeIfAbsent(i, k -> {
                                 computed[0] = true;
                                 return Optional.empty();
                             }).isPresent() && computed[0]) {
-                                initiateNewLink(linkHandler, linkConfigs[i], i);
+                                initiateNewLink(linkHandler, linkPaths.get(i), i);
                                 first = i;
                                 break;
                             }
                         }
-                        for (int i = linkConfigs.length - 1; i >= 0 && i > first; i--) {
+                        for (int i = linkPaths.size() - 1; i >= 0 && i > first; i--) {
                             boolean[] computed = new boolean[]{false};
                             if (!linkHandler.getChannelMap().computeIfAbsent(i, k -> {
                                 computed[0] = true;
                                 return Optional.empty();
                             }).isPresent() && computed[0]) {
-                                initiateNewLink(linkHandler, linkConfigs[i], i);
+                                initiateNewLink(linkHandler, linkPaths.get(i), i);
                                 break;
                             }
                         }
@@ -206,11 +214,6 @@ public class SinglePoint {
             manager.getSessions().values().forEach(LinkSession::close);
             Optional.ofNullable(scheduledMaintainTask.getAndSet(null)).ifPresent(scheduled -> scheduled.cancel(false));
         });
-    }
-
-    @Override
-    public String toString() {
-        return config.getName();
     }
 
 }

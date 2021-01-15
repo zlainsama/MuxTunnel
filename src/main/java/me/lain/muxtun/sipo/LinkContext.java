@@ -3,10 +3,11 @@ package me.lain.muxtun.sipo;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.util.concurrent.EventExecutor;
-import me.lain.muxtun.Shared;
+import me.lain.muxtun.sipo.config.LinkPath;
 import me.lain.muxtun.util.RoundTripTimeMeasurement;
-import me.lain.muxtun.util.SimpleLogger;
 import me.lain.muxtun.util.SmoothedRoundTripTime;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Comparator;
 import java.util.Map;
@@ -19,11 +20,11 @@ class LinkContext {
         LinkContext context = LinkContext.getContext(channel);
         return context.getPriority().get() * 1000L + context.getSRTT().get() + context.getSRTT().var() * (1 + 2 * context.getTasks().size());
     });
-
+    private static final Logger logger = LoggerFactory.getLogger(LinkContext.class);
     private final LinkManager manager;
     private final Channel channel;
     private final EventExecutor executor;
-    private final LinkConfig linkConfig;
+    private final LinkPath linkPath;
     private final AtomicInteger priority;
     private final RoundTripTimeMeasurement RTTM;
     private final SmoothedRoundTripTime SRTT;
@@ -31,11 +32,11 @@ class LinkContext {
 
     private volatile LinkSession session;
 
-    LinkContext(LinkManager manager, Channel channel, LinkConfig linkConfig) {
+    LinkContext(LinkManager manager, Channel channel, LinkPath linkPath) {
         this.manager = manager;
         this.channel = channel;
         this.executor = channel.eventLoop();
-        this.linkConfig = linkConfig;
+        this.linkPath = linkPath;
         this.priority = new AtomicInteger();
         this.RTTM = new RoundTripTimeMeasurement();
         this.SRTT = new SmoothedRoundTripTime() {
@@ -46,7 +47,7 @@ class LinkContext {
 
                 int clf = (int) (Math.min(Math.max(0L, result), 1000L) / 125L);
                 if (clf > getManager().getResources().getMaxCLF())
-                    close().addListener(future -> SimpleLogger.println("%s > link connection %s(%s) closed due to exceeding maxCLF. (SRTT:%dms - clf:%d/maxCLF:%d)", Shared.printNow(), getChannel(), getLinkConfig(), result, clf, getManager().getResources().getMaxCLF()));
+                    close().addListener(future -> logger.debug("closed link connection due to exceeding maxCLF"));
 
                 return result;
             }
@@ -71,8 +72,8 @@ class LinkContext {
         return executor;
     }
 
-    LinkConfig getLinkConfig() {
-        return linkConfig;
+    LinkPath getLinkPath() {
+        return linkPath;
     }
 
     LinkManager getManager() {

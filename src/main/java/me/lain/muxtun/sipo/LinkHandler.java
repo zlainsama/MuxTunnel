@@ -5,10 +5,11 @@ import io.netty.channel.*;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.handler.traffic.ChannelTrafficShapingHandler;
 import io.netty.util.ReferenceCountUtil;
-import me.lain.muxtun.Shared;
 import me.lain.muxtun.codec.Message;
 import me.lain.muxtun.codec.Message.MessageType;
-import me.lain.muxtun.util.SimpleLogger;
+import me.lain.muxtun.sipo.config.LinkPath;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Optional;
@@ -20,6 +21,8 @@ import java.util.stream.IntStream;
 
 @Sharable
 class LinkHandler extends ChannelDuplexHandler {
+
+    private static final Logger logger = LoggerFactory.getLogger(LinkHandler.class);
 
     private final AtomicReference<RandomSession> RS = new AtomicReference<>();
     private final AtomicInteger failCount = new AtomicInteger();
@@ -42,7 +45,7 @@ class LinkHandler extends ChannelDuplexHandler {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        ctx.close().addListener(future -> SimpleLogger.println("%s > link connection %s closed with unexpected error. (%s)", Shared.printNow(), ctx.channel(), cause));
+        ctx.close().addListener(future -> logger.error("closed link connection due to error", cause));
     }
 
     Map<Integer, Optional<Channel>> getChannelMap() {
@@ -90,9 +93,9 @@ class LinkHandler extends ChannelDuplexHandler {
                                         if (session.join(lctx.getChannel())) {
                                             lctx.setSession(session);
 
-                                            LinkConfig linkConfig = lctx.getLinkConfig();
-                                            short priority = linkConfig.getPriority();
-                                            long writeLimit = linkConfig.getWriteLimit();
+                                            LinkPath linkPath = lctx.getLinkPath();
+                                            short priority = linkPath.getPriority();
+                                            long writeLimit = linkPath.getWriteLimit();
                                             lctx.getPriority().set(priority);
                                             lctx.getChannel().pipeline().addBefore(Vars.HANDLERNAME_TLS, Vars.HANDLERNAME_LIMITER, new ChannelTrafficShapingHandler(writeLimit, 0L));
                                             lctx.writeAndFlush(MessageType.LINKCONFIG.create().setPriority(priority).setWriteLimit(writeLimit));

@@ -6,8 +6,8 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.ReferenceCountUtil;
-import me.lain.muxtun.Shared;
-import me.lain.muxtun.util.SimpleLogger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Optional;
 import java.util.Queue;
@@ -15,6 +15,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 
 class StreamBridge extends EmbeddedChannel implements Consumer<ByteBuf> {
+
+    private static final Logger logger = LoggerFactory.getLogger(StreamBridge.class);
 
     private final Queue<ByteBuf> buffer = new ConcurrentLinkedQueue<>();
 
@@ -42,7 +44,7 @@ class StreamBridge extends EmbeddedChannel implements Consumer<ByteBuf> {
 
             @Override
             public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-                ctx.close().addListener(future -> SimpleLogger.println("%s > stream bridge %s closed with unexpected error. (%s)", Shared.printNow(), ctx.channel(), cause));
+                ctx.close().addListener(future -> logger.error("closed stream bridge due to error", cause));
             }
 
             private void handleMessage(StreamContext sctx, ByteBuf msg) throws Exception {
