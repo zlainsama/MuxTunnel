@@ -3,6 +3,7 @@ package me.lain.muxtun.sipo;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.ChannelHandler.Sharable;
+import io.netty.handler.proxy.ProxyConnectException;
 import io.netty.handler.traffic.ChannelTrafficShapingHandler;
 import io.netty.util.ReferenceCountUtil;
 import me.lain.muxtun.codec.Message;
@@ -45,7 +46,10 @@ class LinkHandler extends ChannelDuplexHandler {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        ctx.close().addListener(future -> logger.error("closed link connection due to error", cause));
+        if (cause instanceof ProxyConnectException)
+            ctx.close();
+        else
+            ctx.close().addListener(future -> logger.error("closed link connection due to error", cause));
     }
 
     Map<Integer, Optional<Channel>> getChannelMap() {
