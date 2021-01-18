@@ -39,13 +39,13 @@ public class Client {
                     throw new RuntimeException(e);
                 }
             }).collect(Collectors.toList()));
-            if (Shared.combineFutures(thePoints.stream().map(SinglePoint::start).collect(Collectors.toList())).awaitUninterruptibly(60L, TimeUnit.SECONDS))
+            if (Shared.NettyUtils.combineFutures(thePoints.stream().map(SinglePoint::start).collect(Collectors.toList())).awaitUninterruptibly(60L, TimeUnit.SECONDS))
                 break;
-            Shared.combineFutures(thePoints.stream().map(SinglePoint::stop).collect(Collectors.toList())).awaitUninterruptibly(60L, TimeUnit.SECONDS);
+            Shared.NettyUtils.combineFutures(thePoints.stream().map(SinglePoint::stop).collect(Collectors.toList())).awaitUninterruptibly(60L, TimeUnit.SECONDS);
             thePoints.clear();
             Shared.sleep(5000L);
         }
-        logger.info("Done, thePoints are up.");
+        logger.info("Done, thePoints are up");
 
         theConfigs = null;
 
@@ -54,7 +54,7 @@ public class Client {
             List<Future<?>> futures = new ArrayList<>();
             futures.addAll(Shared.NettyObjects.shutdownGracefully());
             futures.addAll(thePoints.stream().map(SinglePoint::stop).collect(Collectors.toList()));
-            Shared.combineFutures(futures).awaitUninterruptibly(60L, TimeUnit.SECONDS);
+            Shared.NettyUtils.combineFutures(futures).awaitUninterruptibly(60L, TimeUnit.SECONDS);
         }));
     }
 

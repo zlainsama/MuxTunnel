@@ -113,7 +113,7 @@ public class SinglePoint {
     }
 
     public Future<Void> start() {
-        return Shared.combineFutures(Arrays.asList(startTcpStreamService(), startUdpStreamService())).addListener(future -> {
+        return Shared.NettyUtils.combineFutures(Arrays.asList(startTcpStreamService(), startUdpStreamService())).addListener(future -> {
             if (future.isSuccess())
                 Optional.ofNullable(scheduledMaintainTask.getAndSet(GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(() -> {
                     manager.getSessions().values().forEach(LinkSession::tick);
