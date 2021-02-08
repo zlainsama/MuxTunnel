@@ -15,6 +15,7 @@ import me.lain.muxtun.sipo.config.adapter.SocketAddressAdapter;
 import me.lain.muxtun.sipo.config.adapter.UUIDAdapter;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.SocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,12 +48,14 @@ public final class SinglePointConfig {
     }
 
     public static SslContext buildContext(Path pathCert, Path pathKey, List<String> trusts, String algorithm, List<String> ciphers, List<String> protocols) throws IOException {
-        return SslContextBuilder.forClient().keyManager(Files.newInputStream(pathCert, StandardOpenOption.READ), Files.newInputStream(pathKey, StandardOpenOption.READ))
-                .clientAuth(ClientAuth.REQUIRE)
-                .trustManager(FingerprintTrustManagerFactory.builder(algorithm).fingerprints(trusts).build())
-                .ciphers(!ciphers.isEmpty() ? ciphers : !Shared.TLS.defaultCipherSuites.isEmpty() ? Shared.TLS.defaultCipherSuites : null, SupportedCipherSuiteFilter.INSTANCE)
-                .protocols(!protocols.isEmpty() ? protocols : !Shared.TLS.defaultProtocols.isEmpty() ? Shared.TLS.defaultProtocols : null)
-                .build();
+        try (InputStream inCert = Files.newInputStream(pathCert, StandardOpenOption.READ); InputStream inKey = Files.newInputStream(pathKey, StandardOpenOption.READ)) {
+            return SslContextBuilder.forClient().keyManager(inCert, inKey)
+                    .clientAuth(ClientAuth.REQUIRE)
+                    .trustManager(FingerprintTrustManagerFactory.builder(algorithm).fingerprints(trusts).build())
+                    .ciphers(!ciphers.isEmpty() ? ciphers : !Shared.TLS.defaultCipherSuites.isEmpty() ? Shared.TLS.defaultCipherSuites : null, SupportedCipherSuiteFilter.INSTANCE)
+                    .protocols(!protocols.isEmpty() ? protocols : !Shared.TLS.defaultProtocols.isEmpty() ? Shared.TLS.defaultProtocols : null)
+                    .build();
+        }
     }
 
     public static SinglePointConfig fromJson(String json) {
