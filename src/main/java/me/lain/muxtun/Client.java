@@ -21,9 +21,9 @@ public class Client {
     private static final Logger logger = LoggerFactory.getLogger(Client.class);
 
     private static final List<SinglePoint> thePoints = new ArrayList<>();
-    private static List<SinglePointConfig> theConfigs;
 
     public static void run(Path pathConfig) throws IOException {
+        List<SinglePointConfig> theConfigs;
         try (BufferedReader in = Files.newBufferedReader(pathConfig, StandardCharsets.UTF_8)) {
             theConfigs = SinglePointConfig.fromJsonList(in.lines()
                     .filter(line -> !line.trim().startsWith("#"))
@@ -46,8 +46,6 @@ public class Client {
             Shared.sleep(5000L);
         }
         logger.info("Done, thePoints are up");
-
-        theConfigs = null;
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             logger.info("Shutting down...");

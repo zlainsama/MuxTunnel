@@ -18,7 +18,7 @@ class LinkContext {
 
     static final Comparator<Channel> SORTER = Comparator.comparingLong(channel -> {
         LinkContext context = LinkContext.getContext(channel);
-        return context.getPriority().get() * 1000L + context.getSRTT().get() + context.getSRTT().var() * (1 + 2 * context.getTasks().size());
+        return context.getPriority().get() * 1000L + context.getSRTT().get() + context.getSRTT().var() * (1L + 2L * context.getTasks().size());
     });
     private static final Logger logger = LoggerFactory.getLogger(LinkContext.class);
     private final LinkManager manager;

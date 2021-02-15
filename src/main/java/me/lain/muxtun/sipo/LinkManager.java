@@ -96,12 +96,12 @@ class LinkManager {
     }
 
     private void removeCancelledTcpRelayRequests(Future<?> future) {
-        if (future.isCancelled())
+        if (future.isCancelled() && future instanceof RelayRequest)
             getTcpRelayRequests().remove(future);
     }
 
     private void removeCancelledUdpRelayRequests(Future<?> future) {
-        if (future.isCancelled())
+        if (future.isCancelled() && future instanceof RelayRequest)
             getUdpRelayRequests().remove(future);
     }
 

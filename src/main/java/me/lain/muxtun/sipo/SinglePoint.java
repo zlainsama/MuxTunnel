@@ -28,9 +28,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 public class SinglePoint {
+
+    private static final Consumer<Future<?>> CANCEL_FUTURE = future -> future.cancel(false);
+    private static final Optional<Channel> EMPTY_CHANNEL = Optional.empty();
 
     private final SinglePointConfig config;
     private final SslContext sslCtx;
@@ -45,14 +49,16 @@ public class SinglePoint {
         this.config = Objects.requireNonNull(config, "config");
         this.sslCtx = SinglePointConfig.buildContext(config.getPathCert(), config.getPathKey(), config.getTrusts(), config.getCiphers(), config.getProtocols());
         this.channels = new DefaultChannelGroup("SinglePoint", GlobalEventExecutor.INSTANCE, true);
-        this.manager = new LinkManager(new SharedResources(future -> {
-            if (future.isSuccess())
-                channels.add(future.channel());
-        }, config.getTargetAddress(), config.getMaxCLF()));
+        this.manager = new LinkManager(new SharedResources(this::addChannel, config.getTargetAddress(), config.getMaxCLF()));
         this.linkHandlers = IntStream.range(0, config.getNumSessions()).mapToObj(i -> new LinkHandler()).toArray(LinkHandler[]::new);
         this.tcpStreamHandler = TcpStreamHandler.DEFAULT;
         this.udpStreamHandler = new UdpStreamHandler(manager);
         this.scheduledMaintainTask = new AtomicReference<>();
+    }
+
+    private void addChannel(ChannelFuture future) {
+        if (future.isSuccess())
+            getChannels().add(future.channel());
     }
 
     private ChannelFuture initiateNewLink(LinkHandler linkHandler, LinkPath linkPath, int index) {
@@ -95,9 +101,7 @@ public class SinglePoint {
                                 return storedValue;
                             return v;
                         }).get() == channel) {
-                            channel.closeFuture().addListener(closeFuture -> {
-                                linkHandler.getChannelMap().remove(index, storedValue);
-                            });
+                            channel.closeFuture().addListener(closeFuture -> linkHandler.getChannelMap().remove(index, storedValue));
                             RandomSession s = linkHandler.getRandomSession(false);
                             channel.writeAndFlush(MessageType.JOINSESSION.create()
                                     .setId(s.getSessionId())
@@ -107,9 +111,13 @@ public class SinglePoint {
                             channel.close();
                         }
                     } else {
-                        linkHandler.getChannelMap().remove(index, Optional.empty());
+                        GlobalEventExecutor.INSTANCE.schedule(() -> linkHandler.getChannelMap().remove(index, EMPTY_CHANNEL), 5L, TimeUnit.SECONDS);
                     }
                 });
+    }
+
+    public ChannelGroup getChannels() {
+        return channels;
     }
 
     public Future<Void> start() {
@@ -124,7 +132,7 @@ public class SinglePoint {
                             boolean[] computed = new boolean[]{false};
                             if (!linkHandler.getChannelMap().computeIfAbsent(i, k -> {
                                 computed[0] = true;
-                                return Optional.empty();
+                                return EMPTY_CHANNEL;
                             }).isPresent() && computed[0]) {
                                 initiateNewLink(linkHandler, linkPaths.get(i), i);
                                 first = i;
@@ -135,14 +143,14 @@ public class SinglePoint {
                             boolean[] computed = new boolean[]{false};
                             if (!linkHandler.getChannelMap().computeIfAbsent(i, k -> {
                                 computed[0] = true;
-                                return Optional.empty();
+                                return EMPTY_CHANNEL;
                             }).isPresent() && computed[0]) {
                                 initiateNewLink(linkHandler, linkPaths.get(i), i);
                                 break;
                             }
                         }
                     }
-                }, 1L, 1L, TimeUnit.SECONDS))).ifPresent(scheduled -> scheduled.cancel(false));
+                }, 1L, 1L, TimeUnit.SECONDS))).ifPresent(CANCEL_FUTURE);
             else
                 stop();
         });
@@ -210,9 +218,9 @@ public class SinglePoint {
     }
 
     public Future<Void> stop() {
-        return channels.close().addListener(future -> {
+        return getChannels().close().addListener(future -> {
             manager.getSessions().values().forEach(LinkSession::close);
-            Optional.ofNullable(scheduledMaintainTask.getAndSet(null)).ifPresent(scheduled -> scheduled.cancel(false));
+            Optional.ofNullable(scheduledMaintainTask.getAndSet(null)).ifPresent(CANCEL_FUTURE);
         });
     }
 
