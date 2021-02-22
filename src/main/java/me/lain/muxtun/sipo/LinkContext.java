@@ -6,8 +6,8 @@ import io.netty.util.concurrent.EventExecutor;
 import me.lain.muxtun.sipo.config.LinkPath;
 import me.lain.muxtun.util.RoundTripTimeMeasurement;
 import me.lain.muxtun.util.SmoothedRoundTripTime;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.Comparator;
 import java.util.Map;
@@ -20,7 +20,8 @@ class LinkContext {
         LinkContext context = LinkContext.getContext(channel);
         return context.getPriority().get() * 1000L + context.getSRTT().get() + context.getSRTT().var() * (1L + 2L * context.getTasks().size());
     });
-    private static final Logger logger = LoggerFactory.getLogger(LinkContext.class);
+    private static final Logger LOGGER = LogManager.getLogger();
+
     private final LinkManager manager;
     private final Channel channel;
     private final EventExecutor executor;
@@ -47,7 +48,7 @@ class LinkContext {
 
                 int clf = (int) (Math.min(Math.max(0L, result), 1000L) / 125L);
                 if (clf > getManager().getResources().getMaxCLF())
-                    close().addListener(future -> logger.debug("closed link connection due to exceeding maxCLF"));
+                    close().addListener(future -> LOGGER.debug("closed link connection due to exceeding maxCLF"));
 
                 return result;
             }

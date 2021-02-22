@@ -9,8 +9,8 @@ import io.netty.util.ReferenceCountUtil;
 import me.lain.muxtun.codec.Message;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.sipo.config.LinkPath;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.Map;
 import java.util.Optional;
@@ -23,7 +23,7 @@ import java.util.stream.IntStream;
 @Sharable
 class LinkHandler extends ChannelDuplexHandler {
 
-    private static final Logger logger = LoggerFactory.getLogger(LinkHandler.class);
+    private static final Logger LOGGER = LogManager.getLogger();
 
     private final AtomicReference<RandomSession> RS = new AtomicReference<>();
     private final AtomicInteger failCount = new AtomicInteger();
@@ -49,7 +49,7 @@ class LinkHandler extends ChannelDuplexHandler {
         if (cause instanceof ProxyConnectException)
             ctx.close();
         else
-            ctx.close().addListener(future -> logger.error("closed link connection due to error", cause));
+            ctx.close().addListener(future -> LOGGER.error("closed link connection due to error", cause));
     }
 
     Map<Integer, Optional<Channel>> getChannelMap() {

@@ -3,8 +3,8 @@ package me.lain.muxtun;
 import io.netty.util.concurrent.Future;
 import me.lain.muxtun.sipo.SinglePoint;
 import me.lain.muxtun.sipo.config.SinglePointConfig;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 
 public class Client {
 
-    private static final Logger logger = LoggerFactory.getLogger(Client.class);
+    private static final Logger LOGGER = LogManager.getLogger();
 
     private static final List<SinglePoint> thePoints = new ArrayList<>();
 
@@ -30,13 +30,16 @@ public class Client {
                     .collect(Collectors.joining(System.lineSeparator())));
         }
 
-        logger.info("Starting...");
+        LOGGER.info("Starting...");
         while (true) {
             thePoints.addAll(theConfigs.stream().map(config -> {
                 try {
                     return new SinglePoint(config);
                 } catch (IOException e) {
-                    throw new RuntimeException(e);
+                    LOGGER.fatal("error starting thePoints", e);
+                    LogManager.shutdown();
+                    System.exit(1);
+                    return null;
                 }
             }).collect(Collectors.toList()));
             if (Shared.NettyUtils.combineFutures(thePoints.stream().map(SinglePoint::start).collect(Collectors.toList())).awaitUninterruptibly(60L, TimeUnit.SECONDS))
@@ -44,16 +47,23 @@ public class Client {
             Shared.NettyUtils.combineFutures(thePoints.stream().map(SinglePoint::stop).collect(Collectors.toList())).awaitUninterruptibly(60L, TimeUnit.SECONDS);
             thePoints.clear();
             Shared.sleep(5000L);
+            LOGGER.error("Took too long to start, retrying...");
         }
-        logger.info("Done, thePoints are up");
+        LOGGER.info("Done, thePoints are up");
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            logger.info("Shutting down...");
-            List<Future<?>> futures = new ArrayList<>();
-            futures.addAll(Shared.NettyObjects.shutdownGracefully());
-            futures.addAll(thePoints.stream().map(SinglePoint::stop).collect(Collectors.toList()));
-            Shared.NettyUtils.combineFutures(futures).awaitUninterruptibly(60L, TimeUnit.SECONDS);
+            LOGGER.info("Shutting down...");
+            shutdown(60L, TimeUnit.SECONDS);
+            LOGGER.info("Done.");
+            LogManager.shutdown();
         }));
+    }
+
+    public static void shutdown(long timeout, TimeUnit unit) {
+        List<Future<?>> futures = new ArrayList<>();
+        futures.addAll(Shared.NettyObjects.shutdownGracefully());
+        futures.addAll(thePoints.stream().map(SinglePoint::stop).collect(Collectors.toList()));
+        Shared.NettyUtils.combineFutures(futures).awaitUninterruptibly(timeout, unit);
     }
 
 }

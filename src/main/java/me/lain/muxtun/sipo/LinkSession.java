@@ -10,8 +10,8 @@ import io.netty.util.concurrent.ScheduledFuture;
 import me.lain.muxtun.codec.Message;
 import me.lain.muxtun.codec.Message.MessageType;
 import me.lain.muxtun.util.FlowControl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 
 class LinkSession {
 
-    private static final Logger logger = LoggerFactory.getLogger(LinkSession.class);
+    private static final Logger LOGGER = LogManager.getLogger();
 
     private final UUID sessionId;
     private final LinkManager manager;
@@ -199,7 +199,7 @@ class LinkSession {
                             } catch (IllegalReferenceCountException ignored) {
                                 return false;
                             } catch (Throwable e) {
-                                logger.error("error duplicating message", e);
+                                LOGGER.error("error duplicating message", e);
 
                                 return false;
                             }
