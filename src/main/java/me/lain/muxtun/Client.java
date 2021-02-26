@@ -22,6 +22,18 @@ public class Client {
 
     private static final List<SinglePoint> thePoints = new ArrayList<>();
 
+    static {
+        ShutdownTasks.register(() -> {
+            if (!thePoints.isEmpty()) {
+                LOGGER.info("Shutting down...");
+                shutdown(60L, TimeUnit.SECONDS);
+                LOGGER.info("Done.");
+            }
+
+            LogManager.shutdown();
+        });
+    }
+
     public static void run(Path pathConfig) throws IOException {
         List<SinglePointConfig> theConfigs;
         try (BufferedReader in = Files.newBufferedReader(pathConfig, StandardCharsets.UTF_8)) {
@@ -31,6 +43,7 @@ public class Client {
         }
 
         LOGGER.info("Starting...");
+        Future<?> result;
         while (true) {
             thePoints.addAll(theConfigs.stream().map(config -> {
                 try {
@@ -42,21 +55,20 @@ public class Client {
                     return null;
                 }
             }).collect(Collectors.toList()));
-            if (Shared.NettyUtils.combineFutures(thePoints.stream().map(SinglePoint::start).collect(Collectors.toList())).awaitUninterruptibly(60L, TimeUnit.SECONDS))
+            if ((result = Shared.NettyUtils.combineFutures(thePoints.stream().map(SinglePoint::start).collect(Collectors.toList()))).awaitUninterruptibly(60L, TimeUnit.SECONDS))
                 break;
             Shared.NettyUtils.combineFutures(thePoints.stream().map(SinglePoint::stop).collect(Collectors.toList())).awaitUninterruptibly(60L, TimeUnit.SECONDS);
             thePoints.clear();
             Shared.sleep(5000L);
             LOGGER.error("Took too long to start, retrying...");
         }
-        LOGGER.info("Done, thePoints are up");
-
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            LOGGER.info("Shutting down...");
-            shutdown(60L, TimeUnit.SECONDS);
-            LOGGER.info("Done.");
+        if (result.isSuccess())
+            LOGGER.info("Done, thePoints are up.");
+        else {
+            LOGGER.fatal("error starting thePoints", result.cause());
             LogManager.shutdown();
-        }));
+            System.exit(1);
+        }
     }
 
     public static void shutdown(long timeout, TimeUnit unit) {

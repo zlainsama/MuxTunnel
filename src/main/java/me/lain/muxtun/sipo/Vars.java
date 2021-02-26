@@ -20,7 +20,7 @@ class Vars {
     static final AttributeKey<LinkContext> LINKCONTEXT_KEY = AttributeKey.valueOf("me.lain.muxtun.sipo.Vars#LinkContext");
     static final AttributeKey<StreamContext> STREAMCONTEXT_KEY = AttributeKey.valueOf("me.lain.muxtun.sipo.Vars#StreamContext");
 
-    static final int GROUP_THREADS = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors() * 2, Short.MAX_VALUE));
+    static final int GROUP_THREADS = Math.max(2, Math.min(Runtime.getRuntime().availableProcessors() * 2, Short.MAX_VALUE));
     static final EventLoopGroup WORKERS = Shared.NettyObjects.getOrCreateEventLoopGroup("workersGroup", GROUP_THREADS);
     static final EventExecutorGroup SESSIONS = Shared.NettyObjects.getOrCreateEventExecutorGroup("sessionsGroup", GROUP_THREADS);
     static final ExecutorService SHARED_POOL = Executors.newWorkStealingPool(GROUP_THREADS);
