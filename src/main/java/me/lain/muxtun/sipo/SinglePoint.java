@@ -101,7 +101,7 @@ public class SinglePoint {
                                 return storedValue;
                             return v;
                         }).get() == channel) {
-                            channel.closeFuture().addListener(closeFuture -> linkHandler.getChannelMap().remove(index, storedValue));
+                            channel.closeFuture().addListener(closeFuture -> GlobalEventExecutor.INSTANCE.schedule(() -> linkHandler.getChannelMap().remove(index, storedValue), 2L, TimeUnit.SECONDS));
                             RandomSession s = linkHandler.getRandomSession(false);
                             channel.writeAndFlush(MessageType.JOINSESSION.create()
                                     .setId(s.getSessionId())
